@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 perl netcat-openbsd
+
+      - name: Build
+        run: make clean && make
+
+      - name: Basic tests
+        run: bash tests/run_basic_tests.sh
+
+      - name: Database tests
+        run: bash tests/run_db_tests.sh
+
+      - name: Image ops tests
+        run: bash tests/run_image_ops_tests.sh
+
+      - name: Visual tests
+        run: bash tests/run_visual_tests.sh

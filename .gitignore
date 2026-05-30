@@ -1,0 +1,26 @@
+# Build artifacts
+*.o
+imagedb
+cimagedb
+imagedb-server
+*.log
+
+# Runtime data
+data/
+output/
+bench/tmp/
+bench/results/*.csv
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Personal notes (not part of the project)
+docs/project_interview_notes.md
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
