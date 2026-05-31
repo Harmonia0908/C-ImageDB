@@ -2,667 +2,533 @@
 
 [![CI](https://github.com/Harmonia0908/C-ImageDB/actions/workflows/ci.yml/badge.svg)](https://github.com/Harmonia0908/C-ImageDB/actions/workflows/ci.yml)
 
-基于 C 语言的图像数据管理与检索系统
+C-ImageDB 是一个使用 C11 实现的轻量级图像管理、处理与相似检索工具。项目不依赖 OpenCV、SQLite 或第三方图像库，当前支持 PPM P6 和未压缩 24-bit BMP 图像，使用本地二进制文件保存图像元数据和 RGB 直方图特征。
 
-A pure C image data management and retrieval system with PPM/BMP support, image processing, histogram-based similarity search, and binary-file persistence.
+这个项目定位为计算机基础综合实践项目，重点覆盖 C 语言内存管理、文件 I/O、图像格式解析、基础图像处理、简单持久化和命令行测试流程。它不是生产级数据库，也不是语义图像检索系统。
 
-## 1. 项目简介
+## 功能概览
 
-C-ImageDB 是一个使用纯 C 语言实现的图像数据管理与检索系统。支持 PPM P6 和未压缩 24-bit BMP 图像的导入导出、元数据持久化、基础数字图像处理、图像几何变换、RGB 颜色直方图特征提取、相似图像检索，以及数据库管理命令和结果可视化输出。
+- PPM P6 图像读写，支持 header 注释，要求 `maxval=255`
+- 未压缩 24-bit BMP 读写，处理 BGR/RGB 转换、4 字节行对齐和 bottom-up 行序
+- 图像导入到本地 Store，并基于像素内容 hash 做重复导入检测
+- 元数据 Record 和 RGB 直方图 Feature 二进制持久化
+- 图像处理：灰度化、二值化、均值滤波、Sobel 边缘检测、直方图均衡化、中值滤波、高斯滤波、亮度/对比度调整
+- 几何变换：最近邻缩放、双线性缩放、90/180/270 度旋转
+- 相似检索：RGB 256-bin 直方图，支持 `intersection`、`l1`、`l2` 三种度量
+- Store 管理：列表、详情、逻辑删除、文件名搜索、条件查询、统计、compact、CSV 导出
+- 可视化输出：直方图 CSV、直方图图像、检索结果 CSV、检索结果 contact sheet
+- 可选 TCP 查询服务：支持 `LIST`、`INFO <id>`、`SEARCH <id> <k>`、`QUIT`
+- Shell 集成测试和 GitHub Actions 主线测试
 
-本项目定位为计算机基础综合实践项目，体现 C 语言、文件系统、数据结构、基础图像处理算法和计算机图形学的综合应用。
+## 当前状态
 
-## Highlights
+- 主程序：`./imagedb`
+- 兼容/扩展入口：`./cimagedb`，与 `imagedb` 使用同一套 CLI，目前测试脚本主要用它覆盖 `search-similar`、`verify`、`repair`
+- 可选 TCP 服务：`./imagedb-server`
+- 主线测试：`run_basic_tests.sh`、`run_db_tests.sh`、`run_image_ops_tests.sh`、`run_visual_tests.sh`
+- 扩展测试：`search_similar_test.sh`、`report_test.sh`、`benchmark_test.sh`、`verify_repair_test.sh`
+- TCP 测试：`run_net_tests.sh`，可选，不在 CI 主线中运行
 
-- 纯 C 实现，不依赖 OpenCV / SQLite / 第三方图像库
-- 支持 PPM P6 与未压缩 24-bit BMP 图像导入和输出
-- 手写 gray、binary、blur、edge、equalize、median、gaussian、adjust、resize、rotate 等图像处理算法
-- 使用二进制文件管理 metadata/features，覆盖基础图像数据库的持久化流程
-- 支持逻辑删除、compact、CSV export、find-name、query、stats 等数据库管理命令
-- 支持 RGB 归一化直方图交集、l1、l2 三种相似检索度量
-- 包含 hardening 测试，覆盖非法图像、超大 header、删除记录、事务一致性和异常参数
+## 目录结构
 
-## Status
-
-- **Version**: v1.0.0
-- Mainline builds and tests are covered by GitHub Actions.
-- TCP server is optional and not part of the main test path.
-
-## 2. 功能列表
-
-- **Store 初始化**：创建持久化存储目录和文件
-- **图像导入**：导入 PPM P6 与未压缩 24-bit BMP 图像，自动去重
-- **图像列表**：列出所有已导入的图像
-- **图像详情**：查看指定图像的元数据
-- **灰度化**：加权平均法灰度转换
-- **二值化**：基于阈值的二值化处理
-- **均值滤波**：3x3 邻域均值滤波
-- **边缘检测**：Sobel 算子边缘检测
-- **颜色直方图**：RGB 三通道 256-bin 直方图提取与展示
-- **相似检索**：支持 l1 (曼哈顿)、l2 (欧氏)、intersection (RGB 归一化直方图交集) 三种度量
-- **逻辑删除**：软删除图像记录
-- **检索结果导出与拼图**：支持 search-export 和 search-contact 可视化输出
-- **图像缩放**：最近邻插值缩放
-- **图像旋转**：90/180/270 度旋转
-- **文件名查找**：按文件名子串搜索（不区分大小写）
-- **灵活查询**：支持按 id/name/width/height/format/size 多字段条件查询
-- **数据库统计**：记录数、格式分布、平均尺寸、特征数等统计信息
-- **数据库压缩**：永久移除已逻辑删除的记录和特征
-- **CSV 导出**：将元数据导出为 CSV 格式文件
-- **直方图均衡化**：增强图像对比度
-- **中值滤波**：3x3/5x5 中值滤波去噪
-- **高斯滤波**：3x3 高斯平滑
-- **亮度/对比度调整**：线性亮度对比度调节
-- **双线性插值缩放**：bilinear interpolation 高质量缩放
-
-## 3. 使用到的知识点
-
-| 知识领域 | 具体应用 |
-|----------|----------|
-| C 语言 | 结构体、指针、动态内存分配、文件 I/O、函数指针 |
-| 数据结构 | 动态数组、结构体序列化、qsort 排序 |
-| 数字图像处理 | 灰度化、二值化、均值滤波、Sobel 边缘检测 |
-| 计算机图形学 | PPM/BMP 图像格式解析与生成 |
-| 数据库基础 | 二进制文件顺序存储、记录管理、ID 分配 |
-| 信息检索 | RGB 颜色直方图、曼哈顿距离、Top-K 相似检索 |
-
-## 4. 项目结构
-
-```
+```text
 C-ImageDB/
-  Makefile             构建文件 (make / make server)
-  README.md            本文件
-  CONTEXT.md           领域术语表
-  docs/adr/            架构决策记录
-  docs/design.md       设计文档
-  docs/release_v1.0.0.md  v1.0.0 发布说明
-  docs/test_report.md  测试报告
+  Makefile
+  README.md
+  CONTEXT.md
+  LICENSE
+  .github/workflows/ci.yml
   include/
-    common.h           通用宏定义
-    image.h            image_t 类型与内存管理
-    ppm.h              PPM 读写接口
-    bmp.h              BMP 读写接口
-    database.h         Store 持久化接口
-    process.h          图像处理接口
-    feature.h          特征提取接口
-    search.h           相似检索接口
-    similarity.h       外部 query.ppm Top-K 相似检索接口
-    report.h           HTML demo report 生成接口
-    verify.h           数据一致性校验与修复接口
-    cli.h              CLI 接口
-    net_server.h       TCP 服务接口 (optional)
+    common.h       通用常量：名称长度、路径长度、最大图像尺寸
+    image.h        image_t 内存模型
+    ppm.h          PPM P6 读写接口
+    bmp.h          BMP 读写接口
+    database.h     Store 持久化接口
+    process.h      图像处理接口
+    feature.h      RGB 直方图特征接口
+    search.h       相似检索接口
+    similarity.h   外部 PPM 查询图像 Top-K L1 检索接口
+    report.h       HTML demo report 生成接口
+    verify.h       Store 一致性校验与修复接口
+    visualize.h    直方图图像和 contact sheet 接口
+    cli.h          CLI 入口接口
+    net_server.h   TCP 服务接口
   src/
-    main.c             程序入口
-    image.c            图像内存管理实现
-    ppm.c              PPM P6 读写实现
-    bmp.c              24-bit BMP 读写实现
-    database.c         Store 持久化实现
-    process.c          图像处理算法实现
-    feature.c          特征提取实现
-    search.c           相似检索实现
-    similarity.c       外部 query.ppm Top-K 相似检索实现
-    report.c           HTML demo report 生成实现
-    verify.c           数据一致性校验与修复实现
-    cli.c              命令行解析与命令实现
-    net_server.c       TCP 服务实现 (optional)
-    server_main.c      TCP 服务入口 (optional)
+    main.c         CLI 程序入口
+    cli.c          命令解析和命令实现
+    image.c        image_t 创建、销毁、复制和校验
+    ppm.c          PPM P6 解析和写入
+    bmp.c          24-bit BMP 解析和写入
+    database.c     metadata/features/.next_id 持久化
+    process.c      图像处理算法
+    feature.c      RGB 直方图提取和距离/相似度计算
+    search.c       Top-K 相似检索
+    similarity.c   外部 PPM 查询图像相似检索
+    report.c       HTML demo report 生成
+    verify.c       Store 校验与修复
+    visualize.c    可视化图像生成
+    server_main.c  TCP 服务入口
+    net_server.c   TCP 命令服务
   scripts/
-    generate_samples.sh  样本图像生成脚本
+    generate_samples.sh
+    demo.sh
   tests/
-    run_basic_tests.sh   基础测试脚本
-    run_db_tests.sh      数据库专项测试
-    run_image_ops_tests.sh  图像处理专项测试
-    run_visual_tests.sh  可视化输出专项测试
-    search_similar_test.sh  外部 query.ppm Top-K 检索测试
-    report_test.sh      HTML report 测试
-    benchmark_test.sh   benchmark 脚本测试
-    verify_repair_test.sh  数据一致性校验与修复测试
-    run_net_tests.sh     TCP 服务测试 (optional)
+    run_basic_tests.sh
+    run_db_tests.sh
+    run_image_ops_tests.sh
+    run_visual_tests.sh
+    search_similar_test.sh
+    report_test.sh
+    benchmark_test.sh
+    verify_repair_test.sh
+    run_net_tests.sh
   bench/
-    benchmark.sh        图像处理与检索性能基准脚本
-    results/            benchmark.csv 输出目录
-    tmp/                benchmark 临时文件目录
-  samples/             示例 PPM/BMP 图像
-  data/                运行时数据目录
-  output/              图像处理输出目录
+    benchmark.sh
+    results/
+    tmp/
+  docs/
+    design.md
+    demo.md
+    test_report.md
+    release_v1.0.0.md
+    adr/0001-content-hash-dedup-on-import.md
+  samples/
+    sample*.ppm
+    sample_bmp*.bmp
+  data/            运行时 Store，已被 .gitignore 忽略
+  output/          运行时输出目录，已被 .gitignore 忽略
 ```
 
-## 5. 编译方式
+## 构建
 
-### 主程序
+要求：
+
+- `gcc` 或兼容 C11 的 C 编译器
+- `make`
+- 测试脚本需要 `bash`、`python3`、`perl`
+- 可选 TCP 测试需要 `nc`
+
+构建 CLI：
 
 ```bash
-make clean && make
+make clean
+make
 ```
 
-### TCP 服务（可选）
+构建可选 TCP 服务：
 
 ```bash
 make server
 ```
 
-编译要求：
-- GCC (或 Clang)
-- C11 标准
-- `make` 生成 `./imagedb`；`make server` 生成 `./imagedb-server`
+生成结果：
 
-## Quick Demo
+- `./imagedb`
+- `./cimagedb`
+- `./imagedb-server`，仅在执行 `make server` 后生成
+
+## 快速演示
 
 ```bash
-make clean && make
-rm -rf data output && mkdir -p output
+make clean
+make
 bash scripts/generate_samples.sh
+rm -rf data output
+mkdir -p output
+
 ./imagedb init
 ./imagedb import samples/sample1.ppm
 ./imagedb import samples/sample2.ppm
+./imagedb list
+./imagedb info 1
+
 ./imagedb gray 1 output/gray.ppm
 ./imagedb edge 1 output/edge.ppm
 ./imagedb hist-image 1 output/hist.ppm
 ./imagedb search 1 3 --metric intersection
 ./imagedb search-export 1 3 output/demo_search.csv --metric l1
 ./imagedb search-contact 1 3 output/contact.ppm
+./imagedb export output/metadata.csv
 ./imagedb report output output/index.html
 ./imagedb stats
 ```
 
-也可以运行 `bash scripts/demo.sh` 一键生成演示输出。
-
-### Demo Outputs
-
-运行 `bash scripts/demo.sh` 后生成：
-
-| 文件 | 说明 |
-|------|------|
-| `output/demo_gray.ppm` | 灰度化结果 |
-| `output/demo_edge.ppm` | Sobel 边缘检测 |
-| `output/demo_hist.ppm` | RGB 直方图可视化图像 (768×256) |
-| `output/demo_contact.ppm` | 相似检索结果拼图 |
-| `output/demo_metadata.csv` | 图像元数据 CSV |
-| `output/demo_search.csv` | Top-K L1 检索结果 CSV |
-| `output/index.html` | HTML 可视化报告 |
-
-### Demo Report / HTML Visualization
-
-`scripts/demo.sh` 会在生成灰度图、边缘检测图、直方图、metadata CSV 和 Top-K 检索结果后，自动生成 HTML 报告：
+也可以直接运行：
 
 ```bash
 bash scripts/demo.sh
-open output/index.html
 ```
 
-报告位置：
+`scripts/demo.sh` 会编译项目、初始化 Store、导入样例图像，并生成：
 
-```text
-output/index.html
-```
+| 文件 | 说明 |
+|---|---|
+| `output/demo_gray.ppm` | 灰度化结果 |
+| `output/demo_edge.ppm` | Sobel 边缘检测结果 |
+| `output/demo_hist.ppm` | RGB 直方图可视化图像，尺寸 768x256 |
+| `output/demo_contact.ppm` | 查询图像和检索结果的横向拼图 |
+| `output/demo_metadata.csv` | 元数据 CSV |
+| `output/demo_search.csv` | Top-K L1 检索结果 CSV |
+| `output/index.html` | HTML demo report |
 
-报告包含：
+## CLI 命令
 
-- C-ImageDB Demo Report 标题和生成时间
-- 输入样例列表
-- 灰度图、边缘检测图、RGB 直方图和 Top-K contact sheet
-- `demo_metadata.csv` 元数据摘要表
-- Top-K 相似检索结果表，包含 rank、image path、distance
-- demo 测试输出摘要
-
-报告中的图像直接引用 PPM/BMP 输出文件，不引入 PNG/JPG 转换依赖。部分浏览器可能无法内联预览 PPM 文件，遇到这种情况可以下载查看，或使用支持 PPM 的图片查看器打开对应 `output/*.ppm` 文件。
-
-## 6. 运行示例
+### Store
 
 ```bash
-# 生成测试图像
-bash scripts/generate_samples.sh
-
-# 初始化 Store
 ./imagedb init
-
-# 导入图像
-./imagedb import samples/sample1.ppm
-./imagedb import samples/sample2.ppm
-
-# 查看列表
+./imagedb import <file.ppm|file.bmp>
 ./imagedb list
-
-# 查看详情
-./imagedb info 1
-
-# 图像处理
-./imagedb gray 1 output/gray.ppm
-./imagedb binary 1 128 output/binary.ppm
-./imagedb blur 1 output/blur.ppm
-./imagedb edge 1 output/edge.ppm
-
-# 特征与检索
-./imagedb hist 1
-./imagedb search 1 3
-./imagedb search 1 3 --metric l1
-./imagedb search 1 3 --metric l2
-./cimagedb search-similar samples/sample1.ppm --topk 3
-
-# 图像几何变换
-./imagedb resize 1 128 128 output/resized.ppm
-./imagedb resize-bilinear 1 128 128 output/resized_bil.ppm
-./imagedb rotate 1 90 output/rotated.bmp
-
-# 图像处理增强
-./imagedb equalize 1 output/equalized.ppm
-./imagedb median 1 3 output/median.ppm
-./imagedb gaussian 1 output/gaussian.ppm
-./imagedb adjust 1 20 1.2 output/adjusted.ppm
-
-# 数据库管理
-./imagedb find-name cat
-./imagedb query width gt 256
-./imagedb query name contains sample
-./imagedb stats
+./imagedb info <id>
+./imagedb delete <id>
 ./imagedb compact
-./imagedb export output/metadata.csv
-
-# 可视化输出
-./imagedb hist-export 1 output/hist.csv
-./imagedb hist-export 1 output/hist_norm.csv --normalized
-./imagedb hist-image 1 output/histogram.ppm
-./imagedb search-export 1 5 output/search_results.csv
-./imagedb search-contact 1 5 output/contact_sheet.bmp
+./imagedb stats
+./imagedb export <output.csv>
 ```
 
-## 7. 图像处理算法说明
+说明：
 
-### 灰度化
+- `init` 创建 `data/`、`data/images/`、`output/`、`metadata.dat`、`features.dat` 和 `.next_id`
+- `import` 会读取图像、计算像素 hash、检查重复、提取 RGB 直方图、复制原图到 `data/images/`
+- `delete` 是逻辑删除，只设置 Record 的 `deleted` 标记，不删除 `data/images/` 中的图像文件
+- `compact` 会永久移除已逻辑删除的 Record 及其 Feature
+- `export` 只导出未删除记录
 
-使用 NTSC 加权公式：`gray = 0.299*R + 0.587*G + 0.114*B`，输出 R=G=B=gray 的图像（支持 PPM/BMP）。
-
-### 二值化
-
-先将图像灰度化，然后使用阈值判断：灰度值 >= threshold 设为 255，否则为 0。threshold 取值范围 0-255。
-
-### 均值滤波
-
-使用 3x3 邻域均值滤波器对每个像素进行平滑处理。边界像素仅使用有效邻域计算均值。
-
-### Sobel 边缘检测
-
-先将图像灰度化，然后使用 Sobel 算子的水平和垂直卷积核计算梯度：
-
-```
-Gx = [-1  0  1; -2  0  2; -1  0  1]
-Gy = [-1 -2 -1;  0  0  0;  1  2  1]
-```
-
-梯度幅值：`mag = |Gx| + |Gy|`，截断到 0-255。边界像素设为 0。
-
-## 8. Store 持久化设计
-
-不使用外部数据库，通过 C 标准库文件 I/O 实现持久化：
-
-- `data/metadata.dat`：顺序存储 `image_record_t` 二进制记录
-- `data/features.dat`：顺序存储 `image_feature_t` 二进制记录
-- `data/.next_id`：存储下一个可分配的 Image ID
-- `data/images/`：存储导入后的 PPM/BMP 图像文件
-
-查询时从文件读取全部记录到内存，通过线性扫描完成查找。适用于小规模数据集。
-
-## 9. 相似检索方法
-
-使用 RGB 颜色直方图作为图像特征：
-
-- 对每个图像的 R、G、B 三个通道分别统计 256-bin 直方图
-- 计算平均 R、G、B 值作为辅助特征
-- 支持三种相似度度量：
-  - **l1 (曼哈顿距离)**：`distance = Σ|hist_a[i] - hist_b[i]|`（距离越小越相似）
-  - **l2 (欧氏距离)**：`distance = √(Σ(hist_a[i] - hist_b[i])²)`（距离越小越相似）
-  - **intersection (直方图交)**：对 R/G/B 三通道分别做归一化直方图交集 `Σ min(hist_a[i]/total_a, hist_b[i]/total_b)`，再取三通道结果的平均值，score ∈ [0, 1]，分数越高越相似（默认度量）
-- 使用 `--metric` 参数选择度量方式，默认为 intersection
-- 检索时排除查询图像自身和已逻辑删除的图像
-- 对计算出的距离/分数排序，取前 Top-K 个结果
-
-### Similar Image Search
-
-`search-similar` 使用一个外部 PPM P6 文件作为查询图像，对该文件即时计算 RGB 直方图，然后和数据库中已导入图像的直方图做 L1 distance 检索：
+### 图像处理
 
 ```bash
-./cimagedb search-similar <query.ppm> --topk K
+./imagedb gray <id> <out.ppm|out.bmp>
+./imagedb binary <id> <threshold 0-255> <out.ppm|out.bmp>
+./imagedb blur <id> <out.ppm|out.bmp>
+./imagedb edge <id> <out.ppm|out.bmp>
+./imagedb equalize <id> <out.ppm|out.bmp>
+./imagedb median <id> <3|5> <out.ppm|out.bmp>
+./imagedb gaussian <id> <out.ppm|out.bmp>
+./imagedb adjust <id> <brightness> <contrast> <out.ppm|out.bmp>
 ```
 
-示例：
+实现要点：
+
+- `gray` 使用 `0.299R + 0.587G + 0.114B`
+- `binary` 先灰度化，再按阈值输出黑白图
+- `blur` 是 3x3 有效邻域均值滤波
+- `edge` 是 Sobel 边缘检测，边界像素置 0
+- `equalize` 先灰度化，再做灰度直方图均衡化
+- `median` 支持 3x3 和 5x5
+- `gaussian` 使用固定 3x3 kernel：`1 2 1 / 2 4 2 / 1 2 1`
+- `adjust` 使用 `(old - 128) * contrast + 128 + brightness`，结果截断到 `[0,255]`
+
+### 几何变换
 
 ```bash
-./cimagedb search-similar samples/sample1.ppm --topk 3
+./imagedb resize <id> <new_w> <new_h> <out.ppm|out.bmp>
+./imagedb resize-bilinear <id> <new_w> <new_h> <out.ppm|out.bmp>
+./imagedb rotate <id> <90|180|270> <out.ppm|out.bmp>
 ```
 
-输出示例：
+- `resize` 使用最近邻插值
+- `resize-bilinear` 使用双线性插值
+- `rotate` 只支持 90、180、270 度
+
+### 特征与检索
+
+```bash
+./imagedb hist <id>
+./imagedb search <id> <k>
+./imagedb search <id> <k> --metric l1
+./imagedb search <id> <k> --metric l2
+./imagedb search <id> <k> --metric intersection
+./cimagedb search-similar <query.ppm> --topk <k>
+```
+
+检索使用导入时保存的 RGB 直方图 Feature。三种 metric：
+
+| Metric | 类型 | 排序方式 | 说明 |
+|---|---|---|---|
+| `intersection` | 相似度分数 | 越大越相似 | 默认值；对 R/G/B 三通道分别归一化后计算直方图交集，再取平均 |
+| `l1` | 距离 | 越小越相似 | 对三通道原始直方图计数做绝对差求和 |
+| `l2` | 距离 | 越小越相似 | 对三通道原始直方图计数做平方差求和并开方 |
+
+注意：`l1` 和 `l2` 当前使用原始计数，结果会受图像尺寸影响；`intersection` 做了归一化，更适合不同尺寸图像之间的颜色分布比较。
+
+`search-similar` 与 `search <id> <k>` 不同：它不要求查询图像已经导入 Store，而是读取一个外部 PPM P6 文件，现场提取 RGB 直方图，然后和 Store 中未删除图像的 Feature 做 L1 distance 检索。输出为 CSV 风格文本：
 
 ```text
 rank,image_path,distance
 1,data/images/1.ppm,0.00
 2,data/images/2.ppm,8192.00
-3,data/images/3.ppm,12288.00
 ```
 
-- `distance = sum(abs(hist_query[i] - hist_db[i]))`
-- distance 越小表示颜色直方图越相似
-- 当 `K` 大于数据库中的未删除图像数量时，返回全部结果
-- 当 distance 相同，结果按数据库记录顺序稳定输出
+限制：
 
-## 10. 图像几何变换
+- 查询文件必须是 PPM P6，不能是 BMP、PNG 或 JPEG
+- metric 固定为 L1 distance
+- distance 相同时按 Store 记录顺序稳定输出
 
-### 缩放 (resize)
-
-使用最近邻插值 (nearest neighbor)：
-```
-src_x = floor(x * src_width / new_width)
-src_y = floor(y * src_height / new_height)
-```
-仅取最近像素值，不做双线性或双三次插值，保证快速且实现简洁。
-
-### 旋转 (rotate)
-
-支持 90、180、270 度旋转：
-- **90°**：`dst[y][x] = src[x][h-1-y]`，宽高交换
-- **180°**：`dst[y][x] = src[h-1-y][w-1-x]`，宽高不变
-- **270°**：`dst[y][x] = src[w-1-x][y]`，宽高交换
-
-### 直方图均衡化 (equalize)
-
-- 先转灰度，计算灰度直方图和累积分布函数 (CDF)
-- 将 CDF 映射到 [0,255] 范围，生成查找表
-- 每个像素通过查找表映射到新灰度值
-- 输出为灰度 PPM/BMP (R=G=B)
-
-### 中值滤波 (median)
-
-- kernel_size 支持 3 或 5
-- 对每个像素的邻域内所有像素值排序取中位数
-- 边界像素只使用有效邻域
-- 彩色图像三通道分别处理
-
-### 高斯滤波 (gaussian)
-
-- 固定 3x3 高斯核：`[1,2,1; 2,4,2; 1,2,1]`
-- 边界像素按有效邻域加权归一化
-- 彩色图像三通道分别处理
-
-### 亮度/对比度调整 (adjust)
-
-- `new = (old - 128) * contrast + 128 + brightness`
-- brightness 为整数偏移量
-- contrast 为浮点对比度因子 (> 0)
-- 结果 clamp 到 [0, 255]
-
-### 双线性插值缩放 (resize-bilinear)
-
-- 对目标图像每个像素，映射到源图像浮点坐标
-- 取周围 4 个最近像素做双线性加权插值
-- 比最近邻插值质量更高，无锯齿
-
-## 11. 数据库管理
-
-### find-name — 按文件名查找
+### 查询与导出
 
 ```bash
 ./imagedb find-name <keyword>
-```
-
-- 对 record.name 做子串搜索
-- **不区分大小写**
-- 已删除记录不返回
-- 输出：id, name, width, height, format, path
-
-### query — 条件查询
-
-```bash
 ./imagedb query <field> <op> <value>
+./imagedb hist-export <id> <output.csv>
+./imagedb hist-export <id> <output.csv> --normalized
+./imagedb hist-image <id> <out.ppm|out.bmp>
+./imagedb search-export <id> <k> <output.csv>
+./imagedb search-export <id> <k> <output.csv> --metric l1
+./imagedb search-contact <id> <k> <out.ppm|out.bmp>
+./imagedb search-contact <id> <k> <out.ppm|out.bmp> --metric l2
+./imagedb report <output_dir> <report.html>
+./imagedb verify
+./imagedb repair
 ```
 
-支持字段：`id`, `name`, `width`, `height`, `format`, `size`
+`query` 支持字段：
 
-操作符：`eq` (等于), `ne` (不等于), `gt` (大于), `ge` (大于等于), `lt` (小于), `le` (小于等于), `contains` (包含子串)
+| 字段 | 类型 | 支持操作符 |
+|---|---|---|
+| `id` | 数值 | `eq`, `ne`, `gt`, `ge`, `lt`, `le` |
+| `width` | 数值 | `eq`, `ne`, `gt`, `ge`, `lt`, `le` |
+| `height` | 数值 | `eq`, `ne`, `gt`, `ge`, `lt`, `le` |
+| `size` | 数值 | `eq`, `ne`, `gt`, `ge`, `lt`, `le` |
+| `name` | 字符串 | `eq`, `ne`, `contains` |
+| `format` | 字符串 | `eq`, `ne` |
 
-字段-操作符限制：
-- id/width/height/size 支持 eq/ne/gt/ge/lt/le
-- name 支持 eq/ne/contains（contains 区分大小写）
-- format 支持 eq/ne（值为 PPM 或 BMP）
+`find-name` 对文件名做不区分大小写的子串匹配；`query name contains` 当前是区分大小写的。
 
-### stats — 数据库统计
+`report` 会读取 demo 产物目录中的 `demo_metadata.csv` 和 `demo_search.csv`，生成 HTML 报告。`scripts/demo.sh` 默认生成 `output/index.html`。报告中直接引用 PPM/BMP 文件，部分浏览器可能无法内联预览 PPM。
 
-```bash
-./imagedb stats
+`verify` 会检查 Store 中的元数据、图像文件和 Feature 是否一致。`repair` 会尝试删除指向缺失/不可读文件的记录、修复尺寸不一致记录、补生成缺失 Feature，并过滤孤立 Feature。重复 ID 或重复路径这类语义冲突不会自动合并，修复后仍可能通过 `remaining_issues=1` 提示人工处理。
+
+## Store 文件设计
+
+Store 位于 `data/`，由 `init` 创建：
+
+```text
+data/
+  .next_id        下一个可分配 ID，文本整数
+  metadata.dat    image_record_t 数组，二进制顺序存储
+  features.dat    image_feature_t 数组，二进制顺序存储
+  images/         导入后的 PPM/BMP 文件
 ```
 
-输出：
-- total_records（含已删除）
-- active_records / deleted_records
-- total_image_size（未删除图像文件总大小）
-- format_count（PPM / BMP 分别统计）
-- average_width / average_height
-- feature_records（features.dat 中记录数）
+核心结构：
 
-### compact — 压缩数据库
-
-```bash
-./imagedb compact
+```c
+typedef struct image_record {
+    int id;
+    char name[MAX_NAME_LEN];
+    char path[MAX_PATH_LEN];
+    int width;
+    int height;
+    int channels;
+    long file_size;
+    long import_time;
+    unsigned long content_hash;
+    int deleted;
+} image_record_t;
 ```
 
-- 永久移除 `deleted=1` 的记录及其关联的特征记录
-- 使用临时文件 + .bak 回滚机制：先备份原文件为 `.bak`，再 `rename` 替换；若中途失败则从 `.bak` 恢复原状
-- 输出 compact 前后记录数
-- compact 后 `list`/`info`/`search`/`stats` 均正常工作
-
-### export — 导出 CSV
-
-```bash
-./imagedb export <output.csv>
+```c
+typedef struct image_feature {
+    int image_id;
+    int r_hist[256];
+    int g_hist[256];
+    int b_hist[256];
+    double avg_r;
+    double avg_g;
+    double avg_b;
+} image_feature_t;
 ```
 
-- 导出未删除记录
-- CSV 表头：`id,name,path,width,height,channels,format,file_size,import_time`
-- 含逗号或引号的字段自动做 CSV 转义
-- 目标目录不存在时报错
+导入提交使用临时文件、备份文件和 `rename()` 尽量保证 `metadata.dat` 与 `features.dat` 一起更新。这里是简化的文件级替换和回滚，不是完整数据库事务；没有 WAL、并发隔离或崩溃恢复。
 
-### hist-export — 导出直方图 CSV
+## Store 校验与修复
 
-```bash
-./imagedb hist-export <id> <output.csv> [--normalized]
-```
-
-- 导出指定图像的 RGB 256-bin 直方图为 CSV
-- 默认输出原始计数 (r, g, b)
-- `--normalized` 输出归一化值 (r_norm, g_norm, b_norm)，范围 0-1
-
-### hist-image — 绘制直方图图像
-
-```bash
-./imagedb hist-image <id> <output.ppm|output.bmp>
-```
-
-- 生成 768×256 的 RGB 直方图图像
-- 左 256 列为 R 通道，中 256 列为 G 通道，右 256 列为 B 通道
-- 柱高按三通道最大 bin 值统一归一化
-- 背景黑色，柱状使用对应通道颜色
-
-### search-export — 导出检索结果 CSV
-
-```bash
-./imagedb search-export <id> <k> <output.csv> [--metric l1|l2|intersection]
-```
-
-- 执行相似检索并将结果导出为 CSV
-- CSV 字段：rank, id, name, metric, value, path
-
-### search-contact — 检索结果拼图
-
-```bash
-./imagedb search-contact <id> <k> <output.ppm|output.bmp> [--metric ...]
-```
-
-- 生成检索结果的横向拼接缩略图
-- 第一张为查询图像，后续为 Top-K 结果
-- 每张缩放到 128×128，使用最近邻插值
-- 输出总尺寸为 128 × (k+1) 宽，128 高
-
-## 12. Data Integrity
-
-C-ImageDB 使用 `data/metadata.dat` 保存元数据记录，使用 `data/features.dat` 保存直方图特征记录。`verify` 和 `repair` 用于检查并修复这些记录与实际图像文件之间的一致性。这里的 histogram 指 `features.dat` 中和图像 id 对应的 RGB 直方图记录。
-
-### verify — 校验数据库一致性
+校验：
 
 ```bash
 ./cimagedb verify
 ```
 
-检查内容：
-
-- 元数据存储是否存在并可读取
-- feature/histogram 存储是否存在并可读取
-- 每条未删除记录指向的图像文件是否存在
-- 图像宽高/通道数是否与元数据记录一致
-- 每条未删除记录是否有对应直方图特征
-- 重复 id / 重复 path
-- 空字段或非法字段
-
 输出示例：
 
 ```text
 Verify summary:
-total_records=100
-missing_files=2
-missing_histograms=5
-duplicate_ids=1
+total_records=2
+missing_files=0
+missing_histograms=0
+duplicate_ids=0
 duplicate_paths=0
 invalid_records=0
 dimension_mismatches=0
 metadata_missing=0
 feature_store_missing=0
-status=FAILED
+status=OK
 ```
 
-### repair — 修复可恢复的问题
+修复：
 
 ```bash
 ./cimagedb repair
 ```
 
-修复行为：
+修复能力：
 
-- 删除指向不存在文件或无法读取图像的元数据记录
-- 重新生成缺失的 histogram/feature 记录
-- 按实际图像修复宽高/通道数不一致的记录
-- 过滤孤立的 feature 记录
+- 删除指向不存在文件、无法读取图像或字段非法的未删除 Record
+- 按实际图像修复宽、高、通道数字段
+- 为缺失 Feature 的 Record 重新提取 RGB 直方图
+- 重写 `metadata.dat` 和 `features.dat`，过滤 deleted Record 和孤立 Feature
 
-输出示例：
+修复限制：
 
-```text
-Repair summary:
-removed_records=2
-regenerated_histograms=5
-fixed_dimensions=1
-remaining_issues=0
+- 不自动合并重复 ID
+- 不自动判断重复 path 哪条记录应保留
+- `repair` 结束后会再次 `verify`，如果仍有问题会以非 0 状态退出
+
+## 可选 TCP 服务
+
+构建：
+
+```bash
+make server
 ```
 
-`repair` 不会自动猜测如何合并重复 id 或重复 path。遇到这类语义冲突时，修复报告会通过 `remaining_issues=1` 明确提示仍需人工处理。
+运行：
 
-## 13. Benchmark
+```bash
+./imagedb-server 9002
+```
 
-项目提供轻量级 shell benchmark，用于评估图像处理命令和 Top-K 相似检索在不同数据规模下的耗时。
+使用 `nc` 测试：
 
-运行方式：
+```bash
+printf 'LIST\nINFO 1\nSEARCH 1 2\nQUIT\n' | nc -w 2 127.0.0.1 9002
+```
+
+支持命令：
+
+- `LIST`
+- `INFO <id>`
+- `SEARCH <id> <k>`，固定使用 `intersection`
+- `QUIT`
+
+限制：
+
+- 单线程、串行处理客户端
+- 不支持导入、删除或图像处理
+- 无认证、无权限控制、无多客户端并发模型
+
+## 测试
+
+主线测试：
+
+```bash
+bash tests/run_basic_tests.sh
+bash tests/run_db_tests.sh
+bash tests/run_image_ops_tests.sh
+bash tests/run_visual_tests.sh
+```
+
+扩展测试：
+
+```bash
+bash tests/search_similar_test.sh
+bash tests/report_test.sh
+bash tests/benchmark_test.sh
+bash tests/verify_repair_test.sh
+```
+
+可选 TCP 测试：
+
+```bash
+make server
+bash tests/run_net_tests.sh
+```
+
+测试覆盖：
+
+| 脚本 | 覆盖内容 |
+|---|---|
+| `run_basic_tests.sh` | 构建、初始化、导入、PPM/BMP、基础处理、检索、删除、非法参数、坏图像和 hardening 边界 |
+| `run_db_tests.sh` | `find-name`、`query`、`stats`、`export`、`compact` |
+| `run_image_ops_tests.sh` | `equalize`、`median`、`gaussian`、`adjust`、`resize-bilinear` |
+| `run_visual_tests.sh` | `hist-export`、`hist-image`、`search-export`、`search-contact` |
+| `search_similar_test.sh` | 外部 PPM 查询图像的 Top-K L1 检索、稳定排序和错误输入 |
+| `report_test.sh` | `scripts/demo.sh` 生成 HTML report，以及 report 错误路径处理 |
+| `benchmark_test.sh` | `bench/benchmark.sh` 参数校验和结果 CSV |
+| `verify_repair_test.sh` | clean verify、缺失图像修复、缺失 Feature 重生成、重复 ID 检测 |
+| `run_net_tests.sh` | TCP `LIST/INFO/SEARCH/QUIT`，需要 `nc` |
+
+GitHub Actions 当前运行四组主线测试，不运行 TCP 测试。
+
+## Benchmark
+
+项目包含一个轻量级 shell benchmark：
 
 ```bash
 bash bench/benchmark.sh
 ```
 
-默认测试数据规模为 100、500、1000 张图像，每项操作重复 5 次并输出平均耗时。脚本会自动生成简单 PPM 测试图，不依赖外部数据集；如果当前样本不足，不会崩溃。benchmark 运行期间会临时接管 `data/`，并在结束时恢复原有 `data/`。
+默认行为：
 
-结果文件：
+- 构建项目
+- 生成 100、500、1000 张 16x16 合成 PPM 图像和一张 query 图像
+- 临时接管 `data/`，导入不同规模数据集
+- 多次测量 `gray`、`edge`、`hist` 和 `search-similar`
+- 将结果写入 `bench/results/benchmark.csv`
 
-```text
-bench/results/benchmark.csv
-```
-
-CSV 字段：
-
-| 字段 | 含义 |
-|------|------|
-| `operation` | 操作名称：`grayscale`、`edge`、`histogram`、`search_similar` |
-| `dataset_size` | 数据库图像数量 |
-| `topk` | Top-K 参数；非检索操作为 0 |
-| `elapsed_ms` | 重复运行后的平均耗时，单位毫秒 |
-
-示例结果：
+结果字段：
 
 ```text
 operation,dataset_size,topk,elapsed_ms
-histogram,100,0,12
-search_similar,100,5,31
-search_similar,500,5,144
-search_similar,1000,5,298
 ```
 
-解读方式：
-
-- `grayscale` 和 `edge` 主要反映单张图像处理耗时，和数据库规模关系较小
-- `histogram` 当前读取已持久化特征并打印直方图，主要反映特征读取和输出成本
-- `search_similar` 会线性扫描数据库特征，耗时通常随 `dataset_size` 近似线性增长
-- benchmark 结果受机器性能、磁盘缓存和 shell 启动开销影响，适合比较趋势，不适合作为绝对性能承诺
-
-可用环境变量缩小或调整测试：
+可用环境变量调整：
 
 ```bash
 BENCH_SIZES="100 500" BENCH_REPEATS=3 BENCH_TOPK=10 bash bench/benchmark.sh
 ```
 
-## 14. 测试方法
+benchmark 结果受机器性能、磁盘缓存和 shell 启动开销影响，只适合观察趋势，不代表稳定性能承诺。
 
-```bash
-# 主线测试
-bash tests/run_basic_tests.sh
-bash tests/run_db_tests.sh
-bash tests/run_image_ops_tests.sh
-bash tests/run_visual_tests.sh
-bash tests/search_similar_test.sh
-bash tests/report_test.sh
-bash tests/benchmark_test.sh
-bash tests/verify_repair_test.sh
+## 已知限制
 
-# 可选：TCP 服务测试（需先 make server）
-make server
-bash tests/run_net_tests.sh
-```
+- 只支持 PPM P6，且 `maxval` 必须是 255
+- 只支持未压缩 24-bit BMP，不支持压缩 BMP、索引色 BMP、32-bit BMP、PNG、JPEG、GIF
+- Store 使用结构体二进制直接落盘，跨编译器、跨平台、跨字节序不保证兼容
+- 查询和检索基于全量加载和线性扫描，不适合大规模图像库
+- 相似检索只基于 RGB 颜色直方图，不理解纹理、形状或语义
+- `l1`/`l2` 使用原始直方图计数，容易受图像尺寸影响
+- `search-similar` 只支持外部 PPM P6 查询图像，固定使用 L1 distance
+- `verify/repair` 只能修复缺失文件、缺失 Feature、尺寸不一致等可机械判断的问题，不能自动合并重复 ID/path
+- 没有并发写保护，多进程同时导入、删除或 compact 可能造成数据竞争
+- 导入提交是简化的文件级回滚，不是 ACID 事务
+- 输出路径由用户指定，程序不会限制只能写到 `output/`
+- CSV 导出只做基础转义，不是完整 CSV 库实现
+- TCP 服务是可选演示模块，单连接串行，无认证和权限控制
 
-GitHub Actions 会在每次 push 和 PR 时自动运行主线四组测试。
+## 后续可改进方向
 
-## 15. 已知限制
+- 为 Store 写操作增加文件锁，避免多进程写冲突
+- 为 Record 建立 ID/名称索引，减少全量扫描
+- 检索使用 Top-K 堆，避免对所有候选完整排序
+- 对 `l1`/`l2` 使用归一化直方图，降低分辨率影响
+- 设计版本化、固定字节序的持久化格式，替代结构体直接落盘
+- 补充 C 单元测试、ASan/UBSan、parser fuzz 测试和更系统的性能 benchmark
+- 修复 CSV 字段内双引号的严格转义
+- 扩展 PNG/JPEG 支持，或明确保持“无第三方依赖”的教学定位
+- 将 TCP 服务改造成 `select`/`poll` 多客户端模型
 
-- BMP 仅支持未压缩 24-bit (BI_RGB)，不支持 1/4/8/16/32-bit、RLE 压缩及 JPEG/PNG 内嵌
-- 不支持 PNG、JPEG、GIF 等其他图像格式
-- PPM 仅支持 P6 (二进制) 格式，maxval=255
-- Store 基于全量加载 + 线性扫描，不适合大规模图像库（>10万条记录）
-- 特征仅使用 RGB 256-bin 颜色直方图，未实现纹理、形状等高级特征
-- 无并发控制，不适用于多进程/多线程场景
-- 旋转仅支持 90/180/270 度，不支持任意角度
-- `query name contains` 区分大小写（`find-name` 不区分大小写）
-- TCP 查询服务为可选模块，需 `make server` 单独构建
-
-## 16. 后续扩展
-
-| 扩展方向 | 涉及知识 |
-|----------|----------|
-| 哈希表索引加速查询 | 数据结构 |
-| Top-K 堆优化检索 | 数据结构 |
-| KD 树特征索引 | 数据结构/信息检索 |
-| select 多客户端 TCP 服务 | 操作系统/网络 |
-| 更多图像格式 (PNG/JPEG) | 图形学/图像压缩 |
-
-## Resume Description
+## 简历描述
 
 短版：
-C 语言实现的轻量图像数据库，支持 PPM/BMP 导入、图像处理、元数据持久化和 RGB 直方图相似检索。
+
+> 使用 C11 实现轻量级图像 Store 与相似检索工具，支持 PPM/BMP 导入、基础图像处理、二进制文件持久化、Store 校验修复和 RGB 直方图 Top-K 检索。
 
 详细版：
-使用纯 C 实现 PPM P6 与未压缩 24-bit BMP 的解析、导入、导出和基础图像处理算法。  
-通过二进制文件持久化 metadata/features，支持逻辑删除、compact、CSV export、条件查询和数据库统计。  
-基于 RGB 归一化直方图交集、l1、l2 实现相似图像检索，并配套覆盖非法图像、边界参数和一致性场景的测试脚本。
+
+> 基于纯 C 实现 PPM P6 与未压缩 24-bit BMP 的解析、导入、导出和基础图像处理算法；通过二进制文件持久化 metadata/features，支持逻辑删除、compact、条件查询、CSV 导出、HTML report、Store verify/repair 和 benchmark；基于 RGB 归一化直方图交集、l1、l2 以及外部 PPM 查询图像 L1 distance 实现相似图像检索，并编写 shell 集成测试覆盖非法图像、异常参数、deleted 记录和一致性修复等边界场景。
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE).
