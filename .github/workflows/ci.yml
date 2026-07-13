@@ -5,27 +5,37 @@ on:
   pull_request:
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential python3 perl netcat-openbsd
+      - name: Strict build
+        run: make strict
 
-      - name: Build
-        run: make clean && make
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Basic tests
-        run: bash tests/run_basic_tests.sh
+      - name: Unit tests
+        run: make test-unit
 
-      - name: Database tests
-        run: bash tests/run_db_tests.sh
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Image ops tests
-        run: bash tests/run_image_ops_tests.sh
+      - name: Integration tests
+        run: make test-integration
 
-      - name: Visual tests
-        run: bash tests/run_visual_tests.sh
+      - name: Benchmark smoke test
+        run: make benchmark-test
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ASan and UBSan tests
+        run: make sanitizer-test

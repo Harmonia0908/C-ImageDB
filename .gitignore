@@ -3,6 +3,8 @@
 imagedb
 cimagedb
 imagedb-server
+tests/test_core
+*.dSYM/
 *.log
 
 # Runtime data

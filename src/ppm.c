@@ -195,7 +195,7 @@ int ppm_write(const char *path, const image_t *img) {
         return -1;
     }
 
-    data_size = (size_t)img->width * img->height * 3;
+    data_size = (size_t)img->width * (size_t)img->height * IMAGE_CHANNELS;
     if (fwrite(img->data, 1, data_size, fp) != data_size) {
         fclose(fp);
         return -1;

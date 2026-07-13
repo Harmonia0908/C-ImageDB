@@ -4,11 +4,11 @@
 
 C-ImageDB 是一个使用 C11 实现的轻量级图像管理、处理与相似检索工具。项目不依赖 OpenCV、SQLite 或第三方图像库，当前支持 PPM P6 和未压缩 24-bit BMP 图像，使用本地二进制文件保存图像元数据和 RGB 直方图特征。
 
-这个项目定位为计算机基础综合实践项目，重点覆盖 C 语言内存管理、文件 I/O、图像格式解析、基础图像处理、简单持久化和命令行测试流程。它不是生产级数据库，也不是语义图像检索系统。
+这个项目定位为适合 C/C++ 后端岗位展示的小型系统项目：代码规模可在面试中完整讲清，同时覆盖内存与整数安全、二进制/文本协议解析、文件级事务、TCP 流式 I/O、严格编译告警、单元/集成测试和 Sanitizer。它不是生产级数据库，也不是语义图像检索系统。
 
 ## 功能概览
 
-- PPM P6 图像读写，支持 header 注释，要求 `maxval=255`
+- PPM P6 图像读写，支持 header 注释和 LF/CRLF，要求 `maxval=255`
 - 未压缩 24-bit BMP 读写，处理 BGR/RGB 转换、4 字节行对齐和 bottom-up 行序
 - 图像导入到本地 Store，并基于像素内容 hash 做重复导入检测
 - 元数据 Record 和 RGB 直方图 Feature 二进制持久化
@@ -18,16 +18,47 @@ C-ImageDB 是一个使用 C11 实现的轻量级图像管理、处理与相似�
 - Store 管理：列表、详情、逻辑删除、文件名搜索、条件查询、统计、compact、CSV 导出
 - 可视化输出：直方图 CSV、直方图图像、检索结果 CSV、检索结果 contact sheet
 - 可选 TCP 查询服务：支持 `LIST`、`INFO <id>`、`SEARCH <id> <k>`、`QUIT`
-- Shell 集成测试和 GitHub Actions 主线测试
+- C 单元测试、Shell/Python 集成测试、ASan/UBSan 和 GitHub Actions
 
 ## 当前状态
 
 - 主程序：`./imagedb`
 - 兼容/扩展入口：`./cimagedb`，与 `imagedb` 使用同一套 CLI，目前测试脚本主要用它覆盖 `search-similar`、`verify`、`repair`
 - 可选 TCP 服务：`./imagedb-server`
-- 主线测试：`run_basic_tests.sh`、`run_db_tests.sh`、`run_image_ops_tests.sh`、`run_visual_tests.sh`
-- 扩展测试：`search_similar_test.sh`、`report_test.sh`、`benchmark_test.sh`、`verify_repair_test.sh`
-- TCP 测试：`run_net_tests.sh`，可选，不在 CI 主线中运行
+- 单元测试：`tests/test_core.c`
+- 集成测试：图像、Store/CSV、检索、报告、verify/repair 和 TCP 协议测试
+- CI：严格告警构建、单元测试、完整集成测试、benchmark smoke test、ASan/UBSan
+
+## 模块架构与检索流程
+
+```text
+PPM/BMP 文件
+    │  格式校验、尺寸/溢出检查、完整读取
+    ▼
+Image（受限为 3 通道 RGB）
+    ├── process.c ──► 灰度、滤波、边缘、缩放、旋转
+    └── feature.c ──► 3 × 256-bin RGB 直方图
+                         │
+                         ▼
+Store：Record + Feature 成对提交
+    │  metadata.dat / features.dat / images/
+    ▼
+线性 Top-K 检索（intersection / l1 / l2）
+    ├── CLI/CSV/contact sheet/HTML report
+    └── 可选 TCP 只读查询服务
+```
+
+导入时先完整解码 Image、计算像素内容 hash 并提取 Feature；确认不是重复内容后分配单调递增 ID，将原图复制到 `data/images/`，最后成对替换 Record 与 Feature 文件。检索时读取查询 Feature，对所有未删除 Record 的 Feature 计算度量、排序并截取 Top-K。
+
+## 支持的 PPM 格式
+
+- 只接受二进制 PPM `P6`；文本 `P3` 会被明确拒绝。
+- 宽、高必须为正且各不超过 16384；总像素不超过 256M，并在分配前检查乘法溢出。
+- 只接受 `maxval=255`，因此每个 RGB 样本固定为 1 字节。
+- header token 之间允许标准空白和 `# ...` 注释；LF 与 CRLF 行尾均支持。
+- raster 必须至少包含 `width × height × 3` 字节；截断输入会失败。
+- header 与 raster 之间只消费一个分隔符（CRLF 视为一个行尾），不会误吞值为换行、空格或 `#` 的首像素。
+- 内存中的 Image 固定为三通道 RGB；该约束由公共构造与校验 API 共同维护。
 
 ## 目录结构
 
@@ -73,6 +104,7 @@ C-ImageDB/
     generate_samples.sh
     demo.sh
   tests/
+    test_core.c
     run_basic_tests.sh
     run_db_tests.sh
     run_image_ops_tests.sh
@@ -81,7 +113,9 @@ C-ImageDB/
     report_test.sh
     benchmark_test.sh
     verify_repair_test.sh
+    run_storage_tests.sh
     run_net_tests.sh
+    net_protocol_test.py
   bench/
     benchmark.sh
     results/
@@ -106,26 +140,32 @@ C-ImageDB/
 - `gcc` 或兼容 C11 的 C 编译器
 - `make`
 - 测试脚本需要 `bash`、`python3`、`perl`
-- 可选 TCP 测试需要 `nc`
 
 构建 CLI：
 
 ```bash
 make clean
-make
+make all server
 ```
 
-构建可选 TCP 服务：
+也可单独构建可选 TCP 服务，或覆盖编译器：
 
 ```bash
 make server
+make clean && make CC=clang all server
 ```
 
 生成结果：
 
 - `./imagedb`
 - `./cimagedb`
-- `./imagedb-server`，仅在执行 `make server` 后生成
+- `./imagedb-server`
+
+严格告警构建会额外启用 `-Wconversion -Werror`：
+
+```bash
+make strict
+```
 
 ## 快速演示
 
@@ -323,7 +363,7 @@ typedef struct image_record {
     int channels;
     long file_size;
     long import_time;
-    unsigned long content_hash;
+    uint64_t content_hash;
     int deleted;
 } image_record_t;
 ```
@@ -340,7 +380,9 @@ typedef struct image_feature {
 } image_feature_t;
 ```
 
-导入提交使用临时文件、备份文件和 `rename()` 尽量保证 `metadata.dat` 与 `features.dat` 一起更新。这里是简化的文件级替换和回滚，不是完整数据库事务；没有 WAL、并发隔离或崩溃恢复。
+导入、compact 和 repair 共用 Record/Feature 成对替换：先完整写出两个临时文件，再备份原文件并用 `rename()` 安装新文件；普通 I/O/rename 失败会回滚，原文件保留。这里仍是简化的文件级事务，不是 ACID：没有 WAL、目录 `fsync`、并发隔离或进程崩溃恢复。
+
+导入文件名最多 127 字节；Store 内部路径只使用 ID 与规范化的 `.ppm`/`.bmp` 扩展名，不把源路径片段拼入目标路径。CSV 输出使用标准双引号转义（字段内 `"` 写为 `""`，逗号、引号、CR/LF 字段整体加引号），并通过同目录临时文件加 `rename()` 替换，写失败不会留下半份目标 CSV。
 
 ## Store 校验与修复
 
@@ -399,7 +441,7 @@ make server
 ./imagedb-server 9002
 ```
 
-使用 `nc` 测试：
+可用 `nc` 手工测试：
 
 ```bash
 printf 'LIST\nINFO 1\nSEARCH 1 2\nQUIT\n' | nc -w 2 127.0.0.1 9002
@@ -412,6 +454,14 @@ printf 'LIST\nINFO 1\nSEARCH 1 2\nQUIT\n' | nc -w 2 127.0.0.1 9002
 - `SEARCH <id> <k>`，固定使用 `intersection`
 - `QUIT`
 
+协议规则：
+
+- 请求是 ASCII 命令行，以 `\n` 或 `\r\n` 分隔，可在同一连接中连续发送。
+- 单行最多 1023 字节；超长行或包含 NUL 的行会收到 `ERROR`，整行丢弃后从下一个换行恢复。
+- `INFO`/`SEARCH` 使用严格十进制整数解析，不接受溢出或尾随字符；`SEARCH` 的 `k` 范围为 1..1000。
+- 响应是换行分隔的文本流；`QUIT` 返回 `BYE` 并关闭当前连接。
+- 服务端处理 partial read/partial write、`EINTR`、客户端提前关闭与 SIGPIPE；单个客户端收发超时为 10 秒。
+
 限制：
 
 - 单线程、串行处理客户端
@@ -420,28 +470,28 @@ printf 'LIST\nINFO 1\nSEARCH 1 2\nQUIT\n' | nc -w 2 127.0.0.1 9002
 
 ## 测试
 
-主线测试：
+统一入口：
+
+```bash
+make test-unit
+make test-integration
+make test
+```
+
+Sanitizer 与 benchmark smoke test：
+
+```bash
+make sanitizer-test
+make benchmark-test
+```
+
+`sanitizer-test` 使用 `-fsanitize=address,undefined`、`-fno-omit-frame-pointer`，并在 Sanitizer 构建上运行单元与完整集成测试。所有 fixture 都很小，由测试在 `/tmp` 或运行时目录生成，不依赖互联网。
+
+也可单独运行某组：
 
 ```bash
 bash tests/run_basic_tests.sh
-bash tests/run_db_tests.sh
-bash tests/run_image_ops_tests.sh
-bash tests/run_visual_tests.sh
-```
-
-扩展测试：
-
-```bash
-bash tests/search_similar_test.sh
-bash tests/report_test.sh
-bash tests/benchmark_test.sh
-bash tests/verify_repair_test.sh
-```
-
-可选 TCP 测试：
-
-```bash
-make server
+bash tests/run_storage_tests.sh
 bash tests/run_net_tests.sh
 ```
 
@@ -453,13 +503,15 @@ bash tests/run_net_tests.sh
 | `run_db_tests.sh` | `find-name`、`query`、`stats`、`export`、`compact` |
 | `run_image_ops_tests.sh` | `equalize`、`median`、`gaussian`、`adjust`、`resize-bilinear` |
 | `run_visual_tests.sh` | `hist-export`、`hist-image`、`search-export`、`search-contact` |
+| `run_storage_tests.sh` | CSV 严格转义、长字段、规范路径、损坏 Store、ID 溢出、成对提交回滚 |
 | `search_similar_test.sh` | 外部 PPM 查询图像的 Top-K L1 检索、稳定排序和错误输入 |
 | `report_test.sh` | `scripts/demo.sh` 生成 HTML report，以及 report 错误路径处理 |
 | `benchmark_test.sh` | `bench/benchmark.sh` 参数校验和结果 CSV |
 | `verify_repair_test.sh` | clean verify、缺失图像修复、缺失 Feature 重生成、重复 ID 检测 |
-| `run_net_tests.sh` | TCP `LIST/INFO/SEARCH/QUIT`，需要 `nc` |
+| `run_net_tests.sh` | 动态回环端口上的 partial I/O、CRLF、超长/NUL/非法/截断请求、客户端 RST |
+| `test_core.c` | PPM 合法/截断/非法尺寸/溢出/CRLF、1×1 Image、处理边界、非法通道和浮点参数 |
 
-GitHub Actions 当前运行四组主线测试，不运行 TCP 测试。
+GitHub Actions 使用四个独立 job：`build` 执行严格告警构建，`unit` 执行 C 单元测试，`integration` 执行全部集成测试（含 TCP）和 benchmark smoke test，`sanitizers` 在 ASan/UBSan 构建上重复单元与集成测试。
 
 ## Benchmark
 
@@ -502,10 +554,12 @@ benchmark 结果受机器性能、磁盘缓存和 shell 启动开销影响，只
 - `search-similar` 只支持外部 PPM P6 查询图像，固定使用 L1 distance
 - `verify/repair` 只能修复缺失文件、缺失 Feature、尺寸不一致等可机械判断的问题，不能自动合并重复 ID/path
 - 没有并发写保护，多进程同时导入、删除或 compact 可能造成数据竞争
-- 导入提交是简化的文件级回滚，不是 ACID 事务
+- 成对文件替换能回滚普通 I/O 失败，但进程在两次 `rename()` 之间崩溃仍可能需要人工恢复 `.bak`；它不是 ACID 事务
 - 输出路径由用户指定，程序不会限制只能写到 `output/`
-- CSV 导出只做基础转义，不是完整 CSV 库实现
-- TCP 服务是可选演示模块，单连接串行，无认证和权限控制
+- CSV 写出符合本项目字段需要，但 HTML report 的轻量 CSV 读取器不用于通用或不受信任的 CSV 导入
+- TCP 服务是可选演示模块，单连接串行、10 秒 I/O 超时，无 TLS、认证和权限控制
+
+这些限制是明确的项目边界：C-ImageDB 适合学习、测试和求职展示，不应直接用于生产数据、公开网络服务或不受信任的多租户环境。
 
 ## 后续可改进方向
 
@@ -514,8 +568,8 @@ benchmark 结果受机器性能、磁盘缓存和 shell 启动开销影响，只
 - 检索使用 Top-K 堆，避免对所有候选完整排序
 - 对 `l1`/`l2` 使用归一化直方图，降低分辨率影响
 - 设计版本化、固定字节序的持久化格式，替代结构体直接落盘
-- 补充 C 单元测试、ASan/UBSan、parser fuzz 测试和更系统的性能 benchmark
-- 修复 CSV 字段内双引号的严格转义
+- 增加覆盖 PPM/BMP 与 TCP parser 的持续 fuzz 测试
+- 设计可恢复的事务日志和崩溃恢复流程
 - 扩展 PNG/JPEG 支持，或明确保持“无第三方依赖”的教学定位
 - 将 TCP 服务改造成 `select`/`poll` 多客户端模型
 

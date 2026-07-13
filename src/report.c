@@ -48,11 +48,17 @@ static void html_text(FILE *fp, const char *s) {
 }
 
 static int csv_next_cell(const char **cursor, char *cell, size_t cell_size) {
-    const char *p = *cursor;
+    const char *p;
     size_t n = 0;
     int quoted = 0;
+    int closed = 0;
 
-    if (!p || *p == '\0' || *p == '\n' || *p == '\r')
+    if (!cursor || !cell || cell_size == 0)
+        return -1;
+    p = *cursor;
+    if (!p)
+        return -1;
+    if (*p == '\0' || *p == '\n' || *p == '\r')
         return 0;
 
     if (*p == '"') {
@@ -63,27 +69,39 @@ static int csv_next_cell(const char **cursor, char *cell, size_t cell_size) {
     while (*p) {
         if (quoted) {
             if (*p == '"' && p[1] == '"') {
-                if (n + 1 < cell_size)
-                    cell[n++] = '"';
+                if (n + 1 >= cell_size)
+                    return -1;
+                cell[n++] = '"';
                 p += 2;
                 continue;
             }
             if (*p == '"') {
+                closed = 1;
                 p++;
                 if (*p == ',')
                     p++;
+                else if (*p != '\0' && *p != '\n' && *p != '\r')
+                    return -1;
                 break;
             }
+            if (*p == '\n' || *p == '\r')
+                return -1;
         } else if (*p == ',' || *p == '\n' || *p == '\r') {
             if (*p == ',')
                 p++;
             break;
+        } else if (*p == '"') {
+            return -1;
         }
 
-        if (n + 1 < cell_size)
-            cell[n++] = *p;
+        if (n + 1 >= cell_size)
+            return -1;
+        cell[n++] = *p;
         p++;
     }
+
+    if (quoted && !closed)
+        return -1;
 
     cell[n] = '\0';
     *cursor = p;
@@ -116,9 +134,16 @@ static void write_csv_table(FILE *html, const char *csv_path, const char **colum
 
     {
         const char *cur = line;
+        int status = 0;
         while (header_count < 16 &&
-               csv_next_cell(&cur, headers[header_count], sizeof(headers[header_count])))
+               (status = csv_next_cell(&cur, headers[header_count],
+                                       sizeof(headers[header_count]))) > 0)
             header_count++;
+        if (status < 0) {
+            fclose(csv);
+            fputs("<p class=\"muted\">Invalid CSV header.</p>\n", html);
+            return;
+        }
     }
 
     for (i = 0; i < column_count; i++) {
@@ -143,13 +168,15 @@ static void write_csv_table(FILE *html, const char *csv_path, const char **colum
     while (fgets(line, sizeof(line), csv)) {
         char cells[16][REPORT_CELL_MAX];
         int cell_count = 0;
+        int status = 0;
         const char *cur = line;
 
         while (cell_count < 16 &&
-               csv_next_cell(&cur, cells[cell_count], sizeof(cells[cell_count])))
+               (status = csv_next_cell(&cur, cells[cell_count],
+                                       sizeof(cells[cell_count]))) > 0)
             cell_count++;
 
-        if (cell_count == 0)
+        if (status < 0 || cell_count == 0)
             continue;
 
         fputs("<tr>", html);
@@ -187,13 +214,15 @@ static void write_search_table(FILE *html, const char *csv_path) {
     while (fgets(line, sizeof(line), csv)) {
         char cells[16][REPORT_CELL_MAX];
         int cell_count = 0;
+        int status = 0;
         const char *cur = line;
 
         while (cell_count < 16 &&
-               csv_next_cell(&cur, cells[cell_count], sizeof(cells[cell_count])))
+               (status = csv_next_cell(&cur, cells[cell_count],
+                                       sizeof(cells[cell_count]))) > 0)
             cell_count++;
 
-        if (cell_count < 6)
+        if (status < 0 || cell_count < 6)
             continue;
 
         fputs("<tr><td>", html);
@@ -249,14 +278,18 @@ static void write_sample_list(FILE *html, const char *metadata_csv) {
         char path[REPORT_CELL_MAX] = "";
         const char *cur = line;
         int col = 0;
+        int status = 0;
 
-        while (csv_next_cell(&cur, cell, sizeof(cell))) {
+        while ((status = csv_next_cell(&cur, cell, sizeof(cell))) > 0) {
             if (col == 2) {
                 snprintf(path, sizeof(path), "%s", cell);
                 break;
             }
             col++;
         }
+
+        if (status < 0)
+            continue;
 
         if (path[0]) {
             fputs("<li>", html);
@@ -291,14 +324,18 @@ static void write_original_cards(FILE *html, const char *metadata_csv) {
         char path[REPORT_CELL_MAX] = "";
         const char *cur = line;
         int col = 0;
+        int status = 0;
 
-        while (csv_next_cell(&cur, cell, sizeof(cell))) {
+        while ((status = csv_next_cell(&cur, cell, sizeof(cell))) > 0) {
             if (col == 2) {
                 snprintf(path, sizeof(path), "%s", cell);
                 break;
             }
             col++;
         }
+
+        if (status < 0)
+            continue;
 
         if (path[0]) {
             fputs("<figure class=\"card\"><img src=\"../", html);
@@ -329,6 +366,10 @@ int generate_html_report(const char *output_dir, const char *report_path) {
     if (!dir_exists(output_dir)) {
         fprintf(stderr, "[ERROR] Output directory does not exist: %s\n",
                 output_dir ? output_dir : "(null)");
+        return -1;
+    }
+    if (!report_path) {
+        fprintf(stderr, "[ERROR] Report path is required\n");
         return -1;
     }
 

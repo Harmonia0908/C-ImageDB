@@ -265,7 +265,7 @@ int db_load_records(const char *data_dir, image_record_t **records, int *count) 
     if (fsize < 0) { fclose(fp); free(path); return -1; }
     rewind(fp);
 
-    if (fsize % sizeof(image_record_t) != 0)
+    if ((size_t)fsize % sizeof(image_record_t) != 0)
         { fclose(fp); free(path); return -1; }
 
     if (fsize == 0) {
@@ -397,7 +397,7 @@ int db_load_features(const char *data_dir, image_feature_t **features, int *coun
     if (fsize < 0) { fclose(fp); free(path); return -1; }
     rewind(fp);
 
-    if (fsize % sizeof(image_feature_t) != 0)
+    if ((size_t)fsize % sizeof(image_feature_t) != 0)
         { fclose(fp); free(path); return -1; }
 
     if (fsize == 0) {
