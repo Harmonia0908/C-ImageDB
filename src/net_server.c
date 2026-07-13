@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "database.h"
+#include "net_io.h"
 #include "net_server.h"
 #include "search.h"
 
@@ -22,31 +23,10 @@
 #define CLIENT_TIMEOUT_SECONDS  10
 #define MAX_SEARCH_RESULTS      1000
 
-static int send_all(int fd, const char *data, size_t length) {
-    size_t sent = 0;
-
-    while (sent < length) {
-        ssize_t n;
-#ifdef MSG_NOSIGNAL
-        n = send(fd, data + sent, length - sent, MSG_NOSIGNAL);
-#else
-        n = send(fd, data + sent, length - sent, 0);
-#endif
-        if (n > 0) {
-            sent += (size_t)n;
-            continue;
-        }
-        if (n < 0 && errno == EINTR)
-            continue;
-        return -1;
-    }
-    return 0;
-}
-
 static int respond(int fd, const char *message) {
     if (!message)
         return -1;
-    return send_all(fd, message, strlen(message));
+    return net_send_all(fd, message, strlen(message));
 }
 
 static void safe_text(char *dst, size_t dst_size, const char *src) {

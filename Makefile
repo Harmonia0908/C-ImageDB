@@ -14,7 +14,7 @@ endif
 
 COMMON_SRC = src/image.c src/ppm.c src/bmp.c src/database.c src/process.c src/feature.c src/search.c src/similarity.c src/report.c src/verify.c src/visualize.c
 CLI_SRC    = src/main.c src/cli.c
-SERVER_SRC = src/server_main.c src/net_server.c
+SERVER_SRC = src/server_main.c src/net_server.c src/net_io.c
 
 COMMON_OBJ = $(COMMON_SRC:.c=.o)
 CLI_OBJ    = $(CLI_SRC:.c=.o)
@@ -23,6 +23,8 @@ SERVER_OBJ = $(SERVER_SRC:.c=.o)
 ALL_OBJ = $(COMMON_OBJ) $(CLI_OBJ) $(SERVER_OBJ)
 CORE_TEST_BIN = tests/test_core
 CORE_TEST_SRC = tests/test_core.c src/image.c src/ppm.c src/process.c src/feature.c
+NET_IO_TEST_BIN = tests/test_net_io
+NET_IO_TEST_SRC = tests/test_net_io.c src/net_io.c
 
 .PHONY: all server clean strict test test-unit test-integration \
 	benchmark-test sanitizer-test
@@ -46,8 +48,12 @@ src/%.o: src/%.c
 $(CORE_TEST_BIN): $(CORE_TEST_SRC)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(CORE_TEST_SRC) $(LDLIBS)
 
-test-unit: $(CORE_TEST_BIN)
+$(NET_IO_TEST_BIN): $(NET_IO_TEST_SRC)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(NET_IO_TEST_SRC)
+
+test-unit: $(CORE_TEST_BIN) $(NET_IO_TEST_BIN)
 	./$(CORE_TEST_BIN)
+	./$(NET_IO_TEST_BIN)
 
 test-integration: all server
 	bash tests/run_basic_tests.sh
@@ -70,7 +76,7 @@ benchmark-test: all
 strict:
 	$(MAKE) clean
 	$(MAKE) CFLAGS="$(BASE_CFLAGS) $(WARNING_CFLAGS) -Wconversion -Werror" \
-		all server $(CORE_TEST_BIN)
+		all server $(CORE_TEST_BIN) $(NET_IO_TEST_BIN)
 
 sanitizer-test:
 	$(MAKE) clean
@@ -79,4 +85,5 @@ sanitizer-test:
 		$(MAKE) SANITIZE=1 test
 
 clean:
-	rm -f $(ALL_OBJ) imagedb cimagedb imagedb-server $(CORE_TEST_BIN)
+	rm -f $(ALL_OBJ) imagedb cimagedb imagedb-server \
+		$(CORE_TEST_BIN) $(NET_IO_TEST_BIN)

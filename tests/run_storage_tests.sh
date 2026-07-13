@@ -10,6 +10,36 @@ cleanup() {
 }
 trap cleanup EXIT
 
+set_first_record_path() {
+    python3 - "$1" <<'PY'
+import ctypes
+from pathlib import Path
+import sys
+
+class Record(ctypes.Structure):
+    _fields_ = [
+        ("id", ctypes.c_int),
+        ("name", ctypes.c_char * 128),
+        ("path", ctypes.c_char * 256),
+        ("width", ctypes.c_int),
+        ("height", ctypes.c_int),
+        ("channels", ctypes.c_int),
+        ("file_size", ctypes.c_long),
+        ("import_time", ctypes.c_long),
+        ("content_hash", ctypes.c_uint64),
+        ("deleted", ctypes.c_int),
+    ]
+
+path = Path("data/metadata.dat")
+data = bytearray(path.read_bytes())
+offset = Record.path.offset
+value = sys.argv[1].encode() + b"\0"
+assert len(value) <= 256
+data[offset:offset + 256] = value.ljust(256, b"\0")
+path.write_bytes(data)
+PY
+}
+
 rm -rf data output "$TMP_ROOT"
 mkdir -p output "$TMP_ROOT/source.with.dot"
 make > /dev/null
@@ -114,6 +144,24 @@ CORRUPT_STATUS=$?
 set -e
 test "$CORRUPT_STATUS" -ne 0
 echo "  store(unterminated field rejected): PASS"
+mv "$TMP_ROOT/metadata.good" data/metadata.dat
+
+cp data/metadata.dat "$TMP_ROOT/metadata.good"
+set_first_record_path "data/images/1.PNM"
+mv data/images/1.ppm data/images/1.PNM
+./imagedb gray 1 output/legacy_path.ppm > /dev/null
+mv data/images/1.PNM data/images/1.ppm
+echo "  store(legacy local extension accepted): PASS"
+mv "$TMP_ROOT/metadata.good" data/metadata.dat
+
+cp data/metadata.dat "$TMP_ROOT/metadata.good"
+set_first_record_path "../../outside.ppm"
+set +e
+./imagedb info 1 > /dev/null 2>&1
+PATH_STATUS=$?
+set -e
+test "$PATH_STATUS" -ne 0
+echo "  store(path traversal rejected): PASS"
 mv "$TMP_ROOT/metadata.good" data/metadata.dat
 
 printf '2147483647\n' > data/.next_id

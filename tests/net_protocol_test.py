@@ -79,7 +79,7 @@ def main() -> int:
         assert "Width:" in output, output
         assert "Metric: intersection" in output, output
         assert "BYE" in output, output
-        print("  tcp(partial read/write + CRLF): PASS")
+        print("  tcp(partial read + fragmented receive + CRLF): PASS")
 
         output = exchange(
             port,

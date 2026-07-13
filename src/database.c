@@ -31,7 +31,7 @@ static char *make_path(const char *data_dir, const char *suffix) {
     char *path;
     size_t len;
 
-    if (!data_dir || !suffix)
+    if (!data_dir || !*data_dir || !suffix)
         return NULL;
     if (strlen(data_dir) > SIZE_MAX - strlen(suffix) - 1)
         return NULL;
@@ -42,6 +42,44 @@ static char *make_path(const char *data_dir, const char *suffix) {
 
     snprintf(path, len, "%s%s", data_dir, suffix);
     return path;
+}
+
+static int record_path_is_store_local(const char *data_dir,
+                                      const image_record_t *record) {
+    char base[MAX_PATH_LEN];
+    const char *separator;
+    const char *suffix;
+    size_t dir_length;
+    int length;
+
+    if (!data_dir || !*data_dir || !record || record->id <= 0)
+        return 0;
+    dir_length = strlen(data_dir);
+    separator = data_dir[dir_length - 1] == '/' ? "" : "/";
+    length = snprintf(base, sizeof(base), "%s%simages/%d",
+                      data_dir, separator, record->id);
+    if (length < 0 || (size_t)length >= sizeof(base) ||
+        strncmp(record->path, base, (size_t)length) != 0)
+        return 0;
+
+    suffix = record->path + length;
+    return *suffix == '\0' ||
+           (*suffix == '.' && strchr(suffix, '/') == NULL);
+}
+
+static int records_are_safe(const char *data_dir,
+                            const image_record_t *records, int count) {
+    int i;
+
+    if (!data_dir || !*data_dir || count < 0 || (count > 0 && !records))
+        return 0;
+    for (i = 0; i < count; i++) {
+        if (!memchr(records[i].name, '\0', MAX_NAME_LEN) ||
+            !memchr(records[i].path, '\0', MAX_PATH_LEN) ||
+            !record_path_is_store_local(data_dir, &records[i]))
+            return 0;
+    }
+    return 1;
 }
 
 static int finish_write(FILE *fp) {
@@ -285,12 +323,9 @@ int db_load_records(const char *data_dir, image_record_t **records, int *count) 
         fclose(fp); free(path); return -1;
     }
 
-    for (int i = 0; i < n; i++) {
-        if (!memchr((*records)[i].name, '\0', MAX_NAME_LEN) ||
-            !memchr((*records)[i].path, '\0', MAX_PATH_LEN)) {
-            free(*records); *records = NULL;
-            fclose(fp); free(path); return -1;
-        }
+    if (!records_are_safe(data_dir, *records, n)) {
+        free(*records); *records = NULL;
+        fclose(fp); free(path); return -1;
     }
 
     *count = n;
@@ -447,7 +482,7 @@ int db_find_feature_by_id(const char *data_dir, int id, image_feature_t *out) {
 int db_write_records(const char *data_dir, const image_record_t *records, int count) {
     char *tmp_path, *real_path;
 
-    if (!data_dir || count < 0 || (count > 0 && !records))
+    if (!records_are_safe(data_dir, records, count))
         return -1;
 
     tmp_path = make_path(data_dir, "/metadata.tmp");
@@ -492,8 +527,8 @@ int db_replace_store(const char *data_dir,
     int meta_installed = 0, feat_installed = 0;
     int result = -1;
 
-    if (!data_dir || record_count < 0 || feature_count < 0 ||
-        (record_count > 0 && !records) || (feature_count > 0 && !features))
+    if (!records_are_safe(data_dir, records, record_count) ||
+        feature_count < 0 || (feature_count > 0 && !features))
         return -1;
 
     tmp_meta = make_path(data_dir, "/metadata.tmp");

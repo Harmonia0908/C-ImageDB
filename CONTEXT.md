@@ -28,7 +28,7 @@ _Avoid_: 软删除, soft delete, 已移除记录
 
 - 导入一个 **Image** 时，系统创建一个 **Record** 和一个 **Feature**，三者通过 ID 关联
 - 导入时基于像素内容哈希去重：若内容哈希与已有 **Record** 匹配，拒绝导入
-- 导入采用尽力而为策略：若 **Record** 写入成功但 **Feature** 提取失败，**Record** 保留，**Feature** 后续可补算
+- 导入先提取 **Feature**，再将 **Record** 与 **Feature** 作为一次逻辑 Store 更新成对提交；普通 I/O 失败会回滚，不保留半份导入
 - **Store** 持久化 **Record** 数组和 **Feature** 数组到独立的二进制文件
 - **Record** 和 **Feature** 之间存在一一对应关系
 - ID 永不复用，单调递增；下一个可用 ID 存储在独立文件 `data/.next_id`

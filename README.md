@@ -84,6 +84,7 @@ C-ImageDB/
     visualize.h    直方图图像和 contact sheet 接口
     cli.h          CLI 入口接口
     net_server.h   TCP 服务接口
+    net_io.h       可测试的 TCP 完整发送接口
   src/
     main.c         CLI 程序入口
     cli.c          命令解析和命令实现
@@ -100,11 +101,13 @@ C-ImageDB/
     visualize.c    可视化图像生成
     server_main.c  TCP 服务入口
     net_server.c   TCP 命令服务
+    net_io.c       partial write 与 EINTR 重试循环
   scripts/
     generate_samples.sh
     demo.sh
   tests/
     test_core.c
+    test_net_io.c
     run_basic_tests.sh
     run_db_tests.sh
     run_image_ops_tests.sh
@@ -503,13 +506,14 @@ bash tests/run_net_tests.sh
 | `run_db_tests.sh` | `find-name`、`query`、`stats`、`export`、`compact` |
 | `run_image_ops_tests.sh` | `equalize`、`median`、`gaussian`、`adjust`、`resize-bilinear` |
 | `run_visual_tests.sh` | `hist-export`、`hist-image`、`search-export`、`search-contact` |
-| `run_storage_tests.sh` | CSV 严格转义、长字段、规范路径、损坏 Store、ID 溢出、成对提交回滚 |
+| `run_storage_tests.sh` | CSV 严格转义、长字段、新旧 Store 本地路径、目录穿越拒绝、损坏 Store、ID 溢出、成对提交回滚 |
 | `search_similar_test.sh` | 外部 PPM 查询图像的 Top-K L1 检索、稳定排序和错误输入 |
-| `report_test.sh` | `scripts/demo.sh` 生成 HTML report，以及 report 错误路径处理 |
+| `report_test.sh` | `scripts/demo.sh` 生成 HTML report、错误路径和畸形 CSV 行处理 |
 | `benchmark_test.sh` | `bench/benchmark.sh` 参数校验和结果 CSV |
 | `verify_repair_test.sh` | clean verify、缺失图像修复、缺失 Feature 重生成、重复 ID 检测 |
-| `run_net_tests.sh` | 动态回环端口上的 partial I/O、CRLF、超长/NUL/非法/截断请求、客户端 RST |
+| `run_net_tests.sh` | 动态回环端口上的 partial read、CRLF、超长/NUL/非法/截断请求、客户端 RST |
 | `test_core.c` | PPM 合法/截断/非法尺寸/溢出/CRLF、1×1 Image、处理边界、非法通道和浮点参数 |
+| `test_net_io.c` | 通过注入短写回调确定性验证 partial write 与 `EINTR` 重试 |
 
 GitHub Actions 使用四个独立 job：`build` 执行严格告警构建，`unit` 执行 C 单元测试，`integration` 执行全部集成测试（含 TCP）和 benchmark smoke test，`sanitizers` 在 ASan/UBSan 构建上重复单元与集成测试。
 

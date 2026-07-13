@@ -4,6 +4,7 @@ imagedb
 cimagedb
 imagedb-server
 tests/test_core
+tests/test_net_io
 *.dSYM/
 *.log
 
