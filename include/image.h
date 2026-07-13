@@ -1,6 +1,8 @@
 #ifndef IMAGE_H
 #define IMAGE_H
 
+#define IMAGE_CHANNELS 3
+
 typedef struct image {
     int width;
     int height;

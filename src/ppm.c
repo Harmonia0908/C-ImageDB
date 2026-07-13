@@ -15,6 +15,7 @@
  * Token is written to buf (at most bufsize bytes, always null-terminated). */
 static int ppm_read_token(FILE *fp, char *buf, size_t bufsize) {
     int c;
+    int truncated = 0;
 
     if (bufsize == 0) return -1;
 
@@ -31,7 +32,7 @@ static int ppm_read_token(FILE *fp, char *buf, size_t bufsize) {
             continue;
         }
 
-        if (!isspace(c))
+        if (!isspace((unsigned char)c))
             break;
     }
 
@@ -41,8 +42,10 @@ static int ppm_read_token(FILE *fp, char *buf, size_t bufsize) {
         do {
             if (i + 1 < bufsize)
                 buf[i++] = (char)c;
+            else
+                truncated = 1;
             c = getc(fp);
-        } while (c != EOF && !isspace(c) && c != '#');
+        } while (c != EOF && !isspace((unsigned char)c) && c != '#');
 
         buf[i] = '\0';
 
@@ -51,6 +54,29 @@ static int ppm_read_token(FILE *fp, char *buf, size_t bufsize) {
             ungetc(c, fp);
     }
 
+    return truncated ? -1 : 0;
+}
+
+/* Consume the single separator between maxval and the binary raster. CRLF is
+ * treated as one line ending; other whitespace is consumed exactly once so a
+ * legitimate whitespace-valued first pixel byte is never skipped. */
+static int ppm_consume_raster_separator(FILE *fp) {
+    int c = getc(fp);
+
+    if (c == EOF)
+        return -1;
+    if (c == '#') {
+        while ((c = getc(fp)) != EOF && c != '\n')
+            ;
+        return c == EOF ? -1 : 0;
+    }
+    if (!isspace((unsigned char)c))
+        return -1;
+    if (c == '\r') {
+        int next = getc(fp);
+        if (next != '\n' && next != EOF)
+            ungetc(next, fp);
+    }
     return 0;
 }
 
@@ -61,6 +87,9 @@ image_t *ppm_read(const char *path) {
     int width, height;
     char *end;
     size_t pixel_bytes;
+
+    if (!path)
+        return NULL;
 
     fp = fopen(path, "rb");
     if (!fp)
@@ -123,23 +152,9 @@ image_t *ppm_read(const char *path) {
             { fclose(fp); return NULL; }
     }
 
-    /* Consume exactly one character separating header from binary data.
-     * The PPM spec requires exactly one whitespace character here.
-     * If it's '#' (trailing comment), skip the comment line. */
-    {
-        int c = getc(fp);
-        if (c == EOF) {
-            fclose(fp);
-            return NULL;
-        }
-        if (c == '#') {
-            while ((c = getc(fp)) != EOF && c != '\n')
-                ;
-            if (c == EOF) {
-                fclose(fp);
-                return NULL;
-            }
-        }
+    if (ppm_consume_raster_separator(fp) != 0) {
+        fclose(fp);
+        return NULL;
     }
 
     pixel_bytes = (size_t)width * (size_t)height * 3;
@@ -156,7 +171,10 @@ image_t *ppm_read(const char *path) {
         return NULL;
     }
 
-    fclose(fp);
+    if (fclose(fp) != 0) {
+        image_destroy(img);
+        return NULL;
+    }
     return img;
 }
 
@@ -164,14 +182,18 @@ int ppm_write(const char *path, const image_t *img) {
     FILE *fp;
     size_t data_size;
 
-    if (!image_valid(img) || img->channels != 3)
+    if (!path || !image_valid(img) || img->channels != IMAGE_CHANNELS)
         return -1;
 
     fp = fopen(path, "wb");
     if (!fp)
         return -1;
 
-    fprintf(fp, "P6\n%d %d\n%d\n", img->width, img->height, PPM_MAX_VAL);
+    if (fprintf(fp, "P6\n%d %d\n%d\n", img->width, img->height,
+                PPM_MAX_VAL) < 0) {
+        fclose(fp);
+        return -1;
+    }
 
     data_size = (size_t)img->width * img->height * 3;
     if (fwrite(img->data, 1, data_size, fp) != data_size) {
@@ -179,6 +201,5 @@ int ppm_write(const char *path, const image_t *img) {
         return -1;
     }
 
-    fclose(fp);
-    return 0;
+    return fclose(fp) == 0 ? 0 : -1;
 }

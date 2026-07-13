@@ -8,7 +8,7 @@ image_t *image_create(int width, int height, int channels) {
     image_t *img;
     size_t w, h, c, pixels, bytes;
 
-    if (width <= 0 || height <= 0 || channels <= 0)
+    if (width <= 0 || height <= 0 || channels != IMAGE_CHANNELS)
         return NULL;
     if (width > MAX_IMAGE_WIDTH || height > MAX_IMAGE_HEIGHT)
         return NULL;
@@ -70,11 +70,20 @@ image_t *image_clone(const image_t *src) {
 }
 
 int image_valid(const image_t *img) {
+    size_t width, height;
+
     if (!img)
         return 0;
-    if (img->width <= 0 || img->height <= 0 || img->channels <= 0)
+    if (img->width <= 0 || img->height <= 0 ||
+        img->width > MAX_IMAGE_WIDTH || img->height > MAX_IMAGE_HEIGHT ||
+        img->channels != IMAGE_CHANNELS)
         return 0;
     if (!img->data)
+        return 0;
+
+    width = (size_t)img->width;
+    height = (size_t)img->height;
+    if (width > SIZE_MAX / height || width * height > MAX_IMAGE_PIXELS)
         return 0;
     return 1;
 }

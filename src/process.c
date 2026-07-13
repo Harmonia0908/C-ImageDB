@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 #include "process.h"
 
 image_t *process_gray(const image_t *src) {
@@ -203,6 +204,8 @@ image_t *process_rotate(const image_t *src, int degrees) {
 
     if (!image_valid(src))
         return NULL;
+    if (degrees != 90 && degrees != 180 && degrees != 270)
+        return NULL;
 
     w = src->width;
     h = src->height;
@@ -237,9 +240,8 @@ image_t *process_rotate(const image_t *src, int degrees) {
                     sy = x;
                     break;
                 default:
-                    sx = x;
-                    sy = y;
-                    break;
+                    image_destroy(dst);
+                    return NULL;
             }
 
             for (c = 0; c < src->channels; c++) {
@@ -399,7 +401,7 @@ image_t *process_adjust(const image_t *src, int brightness, double contrast) {
     size_t total;
     size_t i;
 
-    if (!image_valid(src))
+    if (!image_valid(src) || !isfinite(contrast) || contrast <= 0.0)
         return NULL;
 
     dst = image_create(src->width, src->height, src->channels);

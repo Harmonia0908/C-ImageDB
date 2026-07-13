@@ -63,10 +63,15 @@ int search_similar(const char *data_dir, int query_id, int top_k,
     search_result_t *tmp;
     int tmp_count;
 
+    if (!data_dir || !results || !result_count)
+        return -1;
+
     *results = NULL;
     *result_count = 0;
 
-    if (top_k <= 0)
+    if (top_k <= 0 ||
+        (metric != METRIC_L1 && metric != METRIC_L2 &&
+         metric != METRIC_INTERSECTION))
         return -1;
 
     /* Reject deleted or non-existent query images */

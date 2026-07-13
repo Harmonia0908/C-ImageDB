@@ -84,6 +84,9 @@ double feature_distance_l1(const image_feature_t *a, const image_feature_t *b) {
     int i;
     double dist = 0.0;
 
+    if (!a || !b)
+        return NAN;
+
     for (i = 0; i < 256; i++) {
         dist += fabs((double)a->r_hist[i] - (double)b->r_hist[i]);
         dist += fabs((double)a->g_hist[i] - (double)b->g_hist[i]);
@@ -97,6 +100,9 @@ double feature_distance_l2(const image_feature_t *a, const image_feature_t *b) {
     int i;
     double sum = 0.0;
     double d;
+
+    if (!a || !b)
+        return NAN;
 
     for (i = 0; i < 256; i++) {
         d = (double)a->r_hist[i] - (double)b->r_hist[i];
@@ -113,24 +119,35 @@ double feature_distance_l2(const image_feature_t *a, const image_feature_t *b) {
 double feature_intersection(const image_feature_t *a, const image_feature_t *b) {
     int i;
     double score = 0.0;
-    long total_a = 0, total_b = 0;
+    long total_a[3] = {0, 0, 0};
+    long total_b[3] = {0, 0, 0};
 
-    /* Compute per-channel pixel totals (all channels have same count) */
+    if (!a || !b)
+        return NAN;
+
     for (i = 0; i < 256; i++) {
-        total_a += a->r_hist[i];
-        total_b += b->r_hist[i];
+        if (a->r_hist[i] < 0 || a->g_hist[i] < 0 || a->b_hist[i] < 0 ||
+            b->r_hist[i] < 0 || b->g_hist[i] < 0 || b->b_hist[i] < 0)
+            return 0.0;
+        total_a[0] += a->r_hist[i];
+        total_a[1] += a->g_hist[i];
+        total_a[2] += a->b_hist[i];
+        total_b[0] += b->r_hist[i];
+        total_b[1] += b->g_hist[i];
+        total_b[2] += b->b_hist[i];
     }
 
-    if (total_a == 0 || total_b == 0)
+    if (total_a[0] == 0 || total_a[1] == 0 || total_a[2] == 0 ||
+        total_b[0] == 0 || total_b[1] == 0 || total_b[2] == 0)
         return 0.0;
 
     for (i = 0; i < 256; i++) {
-        double na_r = (double)a->r_hist[i] / (double)total_a;
-        double nb_r = (double)b->r_hist[i] / (double)total_b;
-        double na_g = (double)a->g_hist[i] / (double)total_a;
-        double nb_g = (double)b->g_hist[i] / (double)total_b;
-        double na_b = (double)a->b_hist[i] / (double)total_a;
-        double nb_b = (double)b->b_hist[i] / (double)total_b;
+        double na_r = (double)a->r_hist[i] / (double)total_a[0];
+        double nb_r = (double)b->r_hist[i] / (double)total_b[0];
+        double na_g = (double)a->g_hist[i] / (double)total_a[1];
+        double nb_g = (double)b->g_hist[i] / (double)total_b[1];
+        double na_b = (double)a->b_hist[i] / (double)total_a[2];
+        double nb_b = (double)b->b_hist[i] / (double)total_b[2];
 
         score += (na_r < nb_r) ? na_r : nb_r;
         score += (na_g < nb_g) ? na_g : nb_g;
