@@ -259,8 +259,8 @@ int repair_database(const char *data_dir, repair_summary_t *summary) {
         new_features[new_feature_count++] = feature;
     }
 
-    if (db_write_records(data_dir, new_records, new_record_count) != 0 ||
-        db_write_features(data_dir, new_features, new_feature_count) != 0) {
+    if (db_replace_store(data_dir, new_records, new_record_count,
+                         new_features, new_feature_count) != 0) {
         free(records);
         free(features);
         free(new_records);

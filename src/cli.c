@@ -77,7 +77,7 @@ static int file_copy(const char *src_path, const char *dst_path) {
     src = fopen(src_path, "rb");
     if (!src) return -1;
 
-    dst = fopen(dst_path, "wb");
+    dst = fopen(dst_path, "wbx");
     if (!dst) {
         fclose(src);
         return -1;
@@ -139,8 +139,79 @@ static int check_duplicate(const char *data_dir, uint64_t hash) {
 static void format_time(long t, char *buf, size_t bufsize) {
     time_t tt = (time_t)t;
     struct tm *tm_info;
+
+    if (!buf || bufsize == 0)
+        return;
     tm_info = localtime(&tt);
-    strftime(buf, bufsize, "%Y-%m-%d %H:%M:%S", tm_info);
+    if (!tm_info || strftime(buf, bufsize, "%Y-%m-%d %H:%M:%S", tm_info) == 0)
+        snprintf(buf, bufsize, "unknown");
+}
+
+static FILE *open_atomic_output(const char *output_path, char **tmp_path) {
+    size_t len;
+    FILE *fp;
+
+    if (!output_path || !*output_path || !tmp_path)
+        return NULL;
+    if (strlen(output_path) > SIZE_MAX - sizeof(".tmp"))
+        return NULL;
+    len = strlen(output_path) + sizeof(".tmp");
+    *tmp_path = malloc(len);
+    if (!*tmp_path)
+        return NULL;
+    if (snprintf(*tmp_path, len, "%s.tmp", output_path) < 0) {
+        free(*tmp_path);
+        *tmp_path = NULL;
+        return NULL;
+    }
+    fp = fopen(*tmp_path, "w");
+    if (!fp) {
+        free(*tmp_path);
+        *tmp_path = NULL;
+    }
+    return fp;
+}
+
+static int finish_atomic_output(FILE *fp, char *tmp_path,
+                                const char *output_path) {
+    int failed;
+
+    if (!fp || !tmp_path || !output_path) {
+        free(tmp_path);
+        return -1;
+    }
+    failed = ferror(fp) != 0;
+    if (fflush(fp) != 0)
+        failed = 1;
+    if (fclose(fp) != 0)
+        failed = 1;
+    if (!failed && rename(tmp_path, output_path) == 0) {
+        free(tmp_path);
+        return 0;
+    }
+    unlink(tmp_path);
+    free(tmp_path);
+    return -1;
+}
+
+static int csv_write_field(FILE *fp, const char *field) {
+    const unsigned char *p;
+    int quoted;
+
+    if (!fp || !field)
+        return -1;
+    quoted = strpbrk(field, ",\"\r\n") != NULL;
+    if (quoted && fputc('"', fp) == EOF)
+        return -1;
+    for (p = (const unsigned char *)field; *p; p++) {
+        if (*p == '"' && fputc('"', fp) == EOF)
+            return -1;
+        if (fputc(*p, fp) == EOF)
+            return -1;
+    }
+    if (quoted && fputc('"', fp) == EOF)
+        return -1;
+    return 0;
 }
 
 /* Format-aware image I/O dispatchers */
@@ -158,10 +229,11 @@ static int image_write_file(const char *path, const image_t *img) {
     return ppm_write(path, img);
 }
 
-/* Return a pointer to the file extension (including the dot), or "" */
-static const char *file_ext(const char *path) {
+/* Store only canonical extensions. This avoids carrying directory components
+ * from source paths whose parent directory happens to contain a dot. */
+static const char *stored_extension(const char *path) {
     const char *ext = strrchr(path, '.');
-    return ext ? ext : "";
+    return (ext && strcasecmp(ext, ".bmp") == 0) ? ".bmp" : ".ppm";
 }
 
 /* -- commands -- */
@@ -186,6 +258,7 @@ static int cmd_import(const char *filepath) {
     long fsize;
     size_t pixel_bytes;
     const char *basename;
+    int path_len;
 
     img = image_read_file(filepath);
     if (!img) {
@@ -209,6 +282,15 @@ static int cmd_import(const char *filepath) {
         return 1;
     }
 
+    basename = strrchr(filepath, '/');
+    basename = basename ? basename + 1 : filepath;
+    if (*basename == '\0' || strlen(basename) >= MAX_NAME_LEN) {
+        fprintf(stderr, "[ERROR] Image filename is empty or exceeds %d bytes\n",
+                MAX_NAME_LEN - 1);
+        image_destroy(img);
+        return 1;
+    }
+
     id = db_next_id(DATA_DIR);
     if (id < 0) {
         fprintf(stderr, "[ERROR] Failed to allocate ID\n");
@@ -217,7 +299,13 @@ static int cmd_import(const char *filepath) {
     }
     feature.image_id = id;
 
-    snprintf(dst_path, MAX_PATH_LEN, "data/images/%d%s", id, file_ext(filepath));
+    path_len = snprintf(dst_path, sizeof(dst_path), "data/images/%d%s", id,
+                        stored_extension(filepath));
+    if (path_len < 0 || (size_t)path_len >= sizeof(dst_path)) {
+        fprintf(stderr, "[ERROR] Store path is too long\n");
+        image_destroy(img);
+        return 1;
+    }
 
     if (file_copy(filepath, dst_path) != 0) {
         fprintf(stderr, "[ERROR] Failed to copy image to store\n");
@@ -228,13 +316,10 @@ static int cmd_import(const char *filepath) {
     fsize = file_size(filepath);
     if (fsize < 0) fsize = 0;
 
-    basename = strrchr(filepath, '/');
-    basename = basename ? basename + 1 : filepath;
-
     memset(&record, 0, sizeof(record));
     record.id = id;
-    snprintf(record.name, MAX_NAME_LEN, "%s", basename);
-    snprintf(record.path, MAX_PATH_LEN, "%s", dst_path);
+    memcpy(record.name, basename, strlen(basename) + 1);
+    memcpy(record.path, dst_path, strlen(dst_path) + 1);
     record.width = img->width;
     record.height = img->height;
     record.channels = img->channels;
@@ -737,6 +822,7 @@ static int cmd_hist_export(int id, const char *output_path, int normalized) {
     image_feature_t feature;
     image_record_t rec;
     FILE *fp;
+    char *tmp_path = NULL;
     int bin;
 
     if (db_find_record_by_id(DATA_DIR, id, &rec) != 0) {
@@ -749,7 +835,7 @@ static int cmd_hist_export(int id, const char *output_path, int normalized) {
         return 1;
     }
 
-    fp = fopen(output_path, "w");
+    fp = open_atomic_output(output_path, &tmp_path);
     if (!fp) {
         fprintf(stderr, "[ERROR] Cannot open output file: %s\n", output_path);
         return 1;
@@ -786,7 +872,11 @@ static int cmd_hist_export(int id, const char *output_path, int normalized) {
         }
     }
 
-    fclose(fp);
+    if (finish_atomic_output(fp, tmp_path, output_path) != 0) {
+        fprintf(stderr, "[ERROR] Failed to finish output file: %s\n",
+                output_path);
+        return 1;
+    }
     printf("Histogram exported to %s (%s)\n", output_path,
            normalized ? "normalized" : "raw");
     return 0;
@@ -829,6 +919,7 @@ static int cmd_search_export(int query_id, int top_k, const char *output_path,
     search_result_t *results;
     int count, i;
     FILE *fp;
+    char *tmp_path = NULL;
 
     if (top_k <= 0) {
         fprintf(stderr, "[ERROR] top_k must be positive, got %d\n", top_k);
@@ -840,7 +931,7 @@ static int cmd_search_export(int query_id, int top_k, const char *output_path,
         return 1;
     }
 
-    fp = fopen(output_path, "w");
+    fp = open_atomic_output(output_path, &tmp_path);
     if (!fp) {
         fprintf(stderr, "[ERROR] Cannot open output file: %s\n", output_path);
         free(results);
@@ -854,16 +945,21 @@ static int cmd_search_export(int query_id, int top_k, const char *output_path,
         if (db_find_record_by_id(DATA_DIR, results[i].image_id, &rec) == 0)
             snprintf(path_str, sizeof(path_str), "%s", rec.path);
 
-        fprintf(fp, "%d,%d,%s,%s,%.4f,%s\n",
-                i + 1,
-                results[i].image_id,
-                results[i].name,
-                search_metric_name(metric),
-                results[i].value,
-                path_str);
+        fprintf(fp, "%d,%d,", i + 1, results[i].image_id);
+        csv_write_field(fp, results[i].name);
+        fputc(',', fp);
+        csv_write_field(fp, search_metric_name(metric));
+        fprintf(fp, ",%.4f,", results[i].value);
+        csv_write_field(fp, path_str);
+        fputc('\n', fp);
     }
 
-    fclose(fp);
+    if (finish_atomic_output(fp, tmp_path, output_path) != 0) {
+        fprintf(stderr, "[ERROR] Failed to finish output file: %s\n",
+                output_path);
+        free(results);
+        return 1;
+    }
     free(results);
     printf("Search results exported to %s (%d results)\n", output_path, count);
     return 0;
@@ -1231,6 +1327,7 @@ static int cmd_export(const char *output_path) {
     image_record_t *records;
     int count, i;
     FILE *fp;
+    char *tmp_path = NULL;
     int exported = 0;
     char time_buf[64];
 
@@ -1239,7 +1336,7 @@ static int cmd_export(const char *output_path) {
         return 1;
     }
 
-    fp = fopen(output_path, "w");
+    fp = open_atomic_output(output_path, &tmp_path);
     if (!fp) {
         fprintf(stderr, "[ERROR] Cannot open output file: %s\n", output_path);
         free(records);
@@ -1255,16 +1352,11 @@ static int cmd_export(const char *output_path) {
 
         format_time(rec->import_time, time_buf, sizeof(time_buf));
 
-        /* CSV escape: wrap fields containing comma or quote in double quotes */
         fprintf(fp, "%d,", rec->id);
-        if (strchr(rec->name, ',') || strchr(rec->name, '"'))
-            fprintf(fp, "\"%s\",", rec->name);
-        else
-            fprintf(fp, "%s,", rec->name);
-        if (strchr(rec->path, ',') || strchr(rec->path, '"'))
-            fprintf(fp, "\"%s\",", rec->path);
-        else
-            fprintf(fp, "%s,", rec->path);
+        csv_write_field(fp, rec->name);
+        fputc(',', fp);
+        csv_write_field(fp, rec->path);
+        fputc(',', fp);
         fprintf(fp, "%d,%d,%d,%s,%ld,%s\n",
                 rec->width, rec->height, rec->channels,
                 record_format_str(rec),
@@ -1272,7 +1364,12 @@ static int cmd_export(const char *output_path) {
         exported++;
     }
 
-    fclose(fp);
+    if (finish_atomic_output(fp, tmp_path, output_path) != 0) {
+        fprintf(stderr, "[ERROR] Failed to finish output file: %s\n",
+                output_path);
+        free(records);
+        return 1;
+    }
     free(records);
 
     printf("Exported %d records to %s\n", exported, output_path);

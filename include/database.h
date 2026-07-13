@@ -43,6 +43,13 @@ int db_write_records(const char *data_dir, const image_record_t *records, int co
  * Returns 0 on success, -1 on error. */
 int db_write_features(const char *data_dir, const image_feature_t *features, int count);
 
+/* Atomically replace metadata.dat and features.dat as one logical Store
+ * update. Runtime I/O failures are rolled back; process crashes between the
+ * two POSIX renames remain outside this teaching Store's guarantees. */
+int db_replace_store(const char *data_dir,
+                     const image_record_t *records, int record_count,
+                     const image_feature_t *features, int feature_count);
+
 /* Atomically append a record and its feature to the store.
  * Uses temp+rename for both files. On failure, neither file is modified.
  * Returns 0 on success, -1 on error. */
