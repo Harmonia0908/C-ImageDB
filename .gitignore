@@ -27,3 +27,6 @@ docs/project_interview_notes.md
 *~
 .vscode/
 .idea/
+
+.codegraph/
+graphify-out/
