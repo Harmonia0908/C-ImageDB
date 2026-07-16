@@ -25,7 +25,7 @@ C-ImageDB 是一个使用 C11 实现的轻量级图像管理、处理与相似�
 - 主程序：`./imagedb`
 - 兼容/扩展入口：`./cimagedb`，与 `imagedb` 使用同一套 CLI，目前测试脚本主要用它覆盖 `search-similar`、`verify`、`repair`
 - 可选 TCP 服务：`./imagedb-server`
-- 单元测试：`tests/test_core.c`
+- 单元测试：`tests/test_core.c`、`tests/test_net_io.c`、`tests/test_store.c`、`tests/test_cli_parse.c`、`tests/test_app.c`
 - 集成测试：图像、Store/CSV、检索、报告、verify/repair 和 TCP 协议测试
 - CI：严格告警构建、单元测试、完整集成测试、benchmark smoke test、ASan/UBSan
 
@@ -64,6 +64,7 @@ Store：Record + Feature 成对提交
 
 ```text
 C-ImageDB/
+  .clang-format
   Makefile
   README.md
   CONTEXT.md
@@ -71,10 +72,11 @@ C-ImageDB/
   .github/workflows/ci.yml
   include/
     common.h       通用常量：名称长度、路径长度、最大图像尺寸
+    app.h          结构化应用命令、结果、状态和所有权接口
     image.h        image_t 内存模型
     ppm.h          PPM P6 读写接口
     bmp.h          BMP 读写接口
-    database.h     Store 持久化接口
+    database.h     Store Record/Feature 模型与业务操作接口
     process.h      图像处理接口
     feature.h      RGB 直方图特征接口
     search.h       相似检索接口
@@ -87,11 +89,16 @@ C-ImageDB/
     net_io.h       可测试的 TCP 完整发送接口
   src/
     main.c         CLI 程序入口
-    cli.c          命令解析和命令实现
+    cli.c          CLI 编排、用户文本和退出码
+    cli_parse.c/.h argv 到结构化 app_command_t 的转换
+    cli_output.c/.h 用户请求的图像和 CSV 文件输出
+    app.c          不依赖终端输入输出的应用用例
     image.c        image_t 创建、销毁、复制和校验
     ppm.c          PPM P6 解析和写入
     bmp.c          24-bit BMP 解析和写入
-    database.c     metadata/features/.next_id 持久化
+    database.c     Store 查找、修改、导入提交和 compact 业务步骤
+    storage/
+      store_file.c/.h metadata/features/.next_id 持久化和回滚
     process.c      图像处理算法
     feature.c      RGB 直方图提取和距离/相似度计算
     search.c       Top-K 相似检索
@@ -103,11 +110,16 @@ C-ImageDB/
     net_server.c   TCP 命令服务
     net_io.c       partial write 与 EINTR 重试循环
   scripts/
+    build.sh
+    test.sh
     generate_samples.sh
     demo.sh
   tests/
     test_core.c
     test_net_io.c
+    test_store.c
+    test_cli_parse.c
+    test_app.c
     run_basic_tests.sh
     run_db_tests.sh
     run_image_ops_tests.sh
@@ -117,13 +129,20 @@ C-ImageDB/
     benchmark_test.sh
     verify_repair_test.sh
     run_storage_tests.sh
+    run_cli_compat_tests.sh
     run_net_tests.sh
     net_protocol_test.py
+    fixtures/storage-v1-lp64/
   bench/
     benchmark.sh
     results/
     tmp/
   docs/
+    architecture.md
+    code-walkthrough.md
+    module-guide.md
+    debugging.md
+    refactoring-history.md
     design.md
     demo.md
     test_report.md
@@ -144,7 +163,18 @@ C-ImageDB/
 - `make`
 - 测试脚本需要 `bash`、`python3`、`perl`
 
-构建 CLI：
+推荐使用统一脚本进行 Debug 或 Release 构建：
+
+```bash
+bash scripts/build.sh debug
+bash scripts/build.sh release
+```
+
+- Debug：`-std=c11 -O0 -g3`，并启用项目警告选项。
+- Release：`-std=c11 -O2 -g`，保留调试符号且不定义 `NDEBUG`。
+- 两种配置都会先清理旧目标，再构建 `imagedb`、`cimagedb` 和可选 TCP 服务。
+
+现有 Makefile 入口继续兼容。无参数 `make` 保持原行为，只构建两个 CLI：
 
 ```bash
 make clean
@@ -164,10 +194,17 @@ make clean && make CC=clang all server
 - `./cimagedb`
 - `./imagedb-server`
 
-严格告警构建会额外启用 `-Wconversion -Werror`：
+普通构建启用 `-Wall -Wextra -Wpedantic` 以及项目现有的附加警告。严格告警构建会额外启用 `-Wconversion -Werror`：
 
 ```bash
-make strict
+bash scripts/build.sh strict
+# 等价于：make strict
+```
+
+仓库根目录的 `.clang-format` 适用于 C 源文件。只格式化本次修改的文件，避免对历史代码进行大范围格式化：
+
+```bash
+clang-format -i path/to/changed_file.c
 ```
 
 ## 快速演示
@@ -476,6 +513,14 @@ printf 'LIST\nINFO 1\nSEARCH 1 2\nQUIT\n' | nc -w 2 127.0.0.1 9002
 统一入口：
 
 ```bash
+bash scripts/test.sh all
+bash scripts/test.sh unit
+bash scripts/test.sh integration
+```
+
+原有 Makefile 测试目标保持兼容：
+
+```bash
 make test-unit
 make test-integration
 make test
@@ -484,11 +529,11 @@ make test
 Sanitizer 与 benchmark smoke test：
 
 ```bash
-make sanitizer-test
-make benchmark-test
+bash scripts/test.sh sanitizer
+bash scripts/test.sh benchmark
 ```
 
-`sanitizer-test` 使用 `-fsanitize=address,undefined`、`-fno-omit-frame-pointer`，并在 Sanitizer 构建上运行单元与完整集成测试。所有 fixture 都很小，由测试在 `/tmp` 或运行时目录生成，不依赖互联网。
+`sanitizer-test` 使用 `-fsanitize=address,undefined`、`-fno-omit-frame-pointer`，并在 Sanitizer 构建上运行单元与完整集成测试。大多数临时输入由测试在 `/tmp` 或运行时目录生成；旧 Store 兼容样本以压缩 Base64 fixture 保存在 `tests/fixtures/storage-v1-lp64/`。测试不依赖互联网。
 
 也可单独运行某组：
 
@@ -507,6 +552,7 @@ bash tests/run_net_tests.sh
 | `run_image_ops_tests.sh` | `equalize`、`median`、`gaussian`、`adjust`、`resize-bilinear` |
 | `run_visual_tests.sh` | `hist-export`、`hist-image`、`search-export`、`search-contact` |
 | `run_storage_tests.sh` | CSV 严格转义、长字段、新旧 Store 本地路径、目录穿越拒绝、损坏 Store、ID 溢出、成对提交回滚 |
+| `run_cli_compat_tests.sh` | 代表性命令的精确 stdout、stderr 和退出码兼容性 |
 | `search_similar_test.sh` | 外部 PPM 查询图像的 Top-K L1 检索、稳定排序和错误输入 |
 | `report_test.sh` | `scripts/demo.sh` 生成 HTML report、错误路径和畸形 CSV 行处理 |
 | `benchmark_test.sh` | `bench/benchmark.sh` 参数校验和结果 CSV |
@@ -514,8 +560,11 @@ bash tests/run_net_tests.sh
 | `run_net_tests.sh` | 动态回环端口上的 partial read、CRLF、超长/NUL/非法/截断请求、客户端 RST |
 | `test_core.c` | PPM 合法/截断/非法尺寸/溢出/CRLF、1×1 Image、处理边界、非法通道和浮点参数 |
 | `test_net_io.c` | 通过注入短写回调确定性验证 partial write 与 `EINTR` 重试 |
+| `test_store.c` | Store 创建、空/缺失/损坏文件、round-trip、边界字段、写入失败和成对替换 |
+| `test_cli_parse.c` | argv 到结构化命令、metric/query 校验和解析错误 |
+| `test_app.c` | 不经过 CLI 的 Store 用例、图像处理、查询及结构化错误结果 |
 
-GitHub Actions 使用四个独立 job：`build` 执行严格告警构建，`unit` 执行 C 单元测试，`integration` 执行全部集成测试（含 TCP）和 benchmark smoke test，`sanitizers` 在 ASan/UBSan 构建上重复单元与集成测试。
+GitHub Actions 使用四个独立 job，并调用与本地相同的 `scripts/build.sh` 和 `scripts/test.sh`：`build` 执行严格告警构建，`unit` 执行 C 单元测试，`integration` 执行全部集成测试（含 TCP）和 benchmark smoke test，`sanitizers` 在 ASan/UBSan 构建上重复单元与集成测试。
 
 ## Benchmark
 

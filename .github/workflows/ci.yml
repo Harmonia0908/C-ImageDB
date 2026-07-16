@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Strict build
-        run: make strict
+        run: bash scripts/build.sh strict
 
   unit:
     runs-on: ubuntu-latest
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Unit tests
-        run: make test-unit
+        run: bash scripts/test.sh unit
 
   integration:
     runs-on: ubuntu-latest
@@ -27,10 +27,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Integration tests
-        run: make test-integration
+        run: bash scripts/test.sh integration
 
       - name: Benchmark smoke test
-        run: make benchmark-test
+        run: bash scripts/test.sh benchmark
 
   sanitizers:
     runs-on: ubuntu-latest
@@ -38,4 +38,4 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: ASan and UBSan tests
-        run: make sanitizer-test
+        run: bash scripts/test.sh sanitizer

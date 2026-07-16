@@ -1,0 +1,12 @@
+format=storage-v1-native-structs
+source_commit=cffaa5d209e9f44dc8e9fec45c1013a45f8473f0
+source_platform=Darwin-arm64-LP64
+byte_order=little
+record_size=432
+feature_size=3104
+record_count=1
+feature_count=1
+metadata_sha256=17b907df86b031951a5e87364c8df2f4a3a51bae2645eb82f4a9fce978351200
+features_sha256=3ac67ef0e9b6b830f7760a3caa53bc0495d0d6c707ad932188e62237f13d040c
+next_id_sha256=53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3
+generator=imagedb init; imagedb import samples/sample1.ppm

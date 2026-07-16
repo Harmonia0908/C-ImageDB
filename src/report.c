@@ -354,7 +354,8 @@ static void write_original_cards(FILE *html, const char *metadata_csv) {
     fclose(csv);
 }
 
-int generate_html_report(const char *output_dir, const char *report_path) {
+report_status_t generate_html_report_status(const char *output_dir,
+                                            const char *report_path) {
     FILE *fp;
     char metadata_csv[1024];
     char search_csv[1024];
@@ -363,29 +364,20 @@ int generate_html_report(const char *output_dir, const char *report_path) {
     struct tm *tm_info;
     const char *metadata_cols[] = {"id", "path", "width", "height", "format"};
 
-    if (!dir_exists(output_dir)) {
-        fprintf(stderr, "[ERROR] Output directory does not exist: %s\n",
-                output_dir ? output_dir : "(null)");
-        return -1;
-    }
-    if (!report_path) {
-        fprintf(stderr, "[ERROR] Report path is required\n");
-        return -1;
-    }
+    if (!dir_exists(output_dir))
+        return REPORT_STATUS_OUTPUT_DIR_MISSING;
+    if (!report_path)
+        return REPORT_STATUS_PATH_REQUIRED;
 
     if (path_join(metadata_csv, sizeof(metadata_csv), output_dir,
                   "demo_metadata.csv") != 0 ||
         path_join(search_csv, sizeof(search_csv), output_dir,
-                  "demo_search.csv") != 0) {
-        fprintf(stderr, "[ERROR] Report path is too long\n");
-        return -1;
-    }
+                  "demo_search.csv") != 0)
+        return REPORT_STATUS_PATH_TOO_LONG;
 
     fp = fopen(report_path, "w");
-    if (!fp) {
-        fprintf(stderr, "[ERROR] Cannot write report: %s\n", report_path);
-        return -1;
-    }
+    if (!fp)
+        return REPORT_STATUS_OPEN_FAILED;
 
     now = time(NULL);
     tm_info = localtime(&now);
@@ -442,10 +434,35 @@ int generate_html_report(const char *output_dir, const char *report_path) {
 
     fputs("</main></body>\n</html>\n", fp);
 
-    if (fclose(fp) != 0) {
-        fprintf(stderr, "[ERROR] Failed to finish writing report: %s\n", report_path);
-        return -1;
-    }
+    if (fclose(fp) != 0)
+        return REPORT_STATUS_FINISH_FAILED;
 
-    return 0;
+    return REPORT_STATUS_OK;
+}
+
+int generate_html_report(const char *output_dir, const char *report_path) {
+    report_status_t status = generate_html_report_status(output_dir, report_path);
+
+    switch (status) {
+        case REPORT_STATUS_OK:
+            return 0;
+        case REPORT_STATUS_OUTPUT_DIR_MISSING:
+            fprintf(stderr, "[ERROR] Output directory does not exist: %s\n",
+                    output_dir ? output_dir : "(null)");
+            break;
+        case REPORT_STATUS_PATH_REQUIRED:
+            fprintf(stderr, "[ERROR] Report path is required\n");
+            break;
+        case REPORT_STATUS_PATH_TOO_LONG:
+            fprintf(stderr, "[ERROR] Report path is too long\n");
+            break;
+        case REPORT_STATUS_OPEN_FAILED:
+            fprintf(stderr, "[ERROR] Cannot write report: %s\n", report_path);
+            break;
+        case REPORT_STATUS_FINISH_FAILED:
+            fprintf(stderr, "[ERROR] Failed to finish writing report: %s\n",
+                    report_path);
+            break;
+    }
+    return -1;
 }
